@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
@@ -8,19 +9,19 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 from dateutil.relativedelta import relativedelta
-
+from openpyxl import load_workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
 
 # =========================
-# Streamlit page setup
+# Streamlit Page
 # =========================
 st.set_page_config(page_title="CRMBI Comercial (Por EJE)", layout="wide")
 
-# Light BI-ish polish (no extra deps)
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 1.25rem; }
+      .block-container { padding-top: 1.1rem; }
       .kpi-card {
         border-radius: 16px; padding: 14px 16px; background: #ffffff;
         box-shadow: 0 1px 10px rgba(15,23,42,.06);
@@ -44,14 +45,14 @@ st.markdown(
       .badge-red   { background:#fdecec; color:#842029; border-color:#f5c2c7; }
       .badge-gray  { background:#eef2f7; color:#334155; border-color:#dbe3ef; }
       .muted { color:#64748b; font-size: 13px; }
+      .hr { height:1px; background:rgba(15,23,42,.08); margin: 14px 0; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-
 # =========================
-# CONFIG (business logic)
+# CONFIG (KPIs + specialties)
 # =========================
 KEY_SPECIALTIES = [
     {"id": "ORTOPEDIA",    "match": ["ORTOPEDIA"]},
@@ -152,11 +153,10 @@ if "targets" not in st.session_state:
     st.session_state.targets = {}
 
 if "status" not in st.session_state:
-    st.session_state.status = "Selecciona Mes/Año y sube el Excel."
-
+    st.session_state.status = "Sube el Excel para iniciar."
 
 # =========================
-# UI helpers
+# Utility formatting
 # =========================
 def badge(text: str, tone: str = "gray"):
     tone_class = {
@@ -179,20 +179,6 @@ def kpi_card(title: str, value: str, sub: str = ""):
         """,
         unsafe_allow_html=True,
     )
-
-
-def download_json_button(label: str, data: Dict[str, Any], filename: str):
-    raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-    st.download_button(label=label, data=raw, file_name=filename, mime="application/json")
-
-
-def read_uploaded_json(uploaded_file) -> Dict[str, Any]:
-    if uploaded_file is None:
-        return {}
-    try:
-        return json.loads(uploaded_file.read().decode("utf-8"))
-    except Exception:
-        return {}
 
 
 def fmt_int(x: Optional[float]) -> str:
@@ -223,132 +209,156 @@ def traffic_light(ratio: Optional[float]) -> Tuple[str, str]:
     return ("🔴 ROJO", "red")
 
 
-# =========================
-# Excel parsing helpers
-# =========================
-def _norm(v: Any) -> str:
-    return "" if v is None else str(v).strip()
+def download_json_button(label: str, data: Dict[str, Any], filename: str):
+    raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    st.download_button(label=label, data=raw, file_name=filename, mime="application/json")
 
 
-def _parse_month_to_iso(v: Any) -> Optional[str]:
-    if v is None or _norm(v) == "":
+def read_uploaded_json(uploaded_file) -> Dict[str, Any]:
+    if uploaded_file is None:
+        return {}
+    try:
+        return json.loads(uploaded_file.read().decode("utf-8"))
+    except Exception:
+        return {}
+
+
+# =========================
+# Text normalization (accent-insensitive)
+# =========================
+def norm_text(v: Any) -> str:
+    s = "" if v is None else str(v).strip()
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return s.lower()
+
+
+def parse_month_to_iso(v: Any) -> Optional[str]:
+    if v is None:
         return None
-
-    # datetime/date-like
+    # date/datetime
     if hasattr(v, "year") and hasattr(v, "month"):
         try:
             return f"{int(v.year)}-{int(v.month):02d}-01"
         except Exception:
             pass
-
-    # string parse
-    s = _norm(v)
-    dt = pd.to_datetime(s, errors="coerce")
+    # string
+    dt = pd.to_datetime(str(v).strip(), errors="coerce")
     if pd.isna(dt):
         return None
     return f"{dt.year}-{dt.month:02d}-01"
 
 
-def _build_grid_with_merges(ws: Worksheet) -> List[List[Any]]:
-    R, C = ws.max_row or 0, ws.max_column or 0
-    grid = [[ws.cell(row=r, column=c).value for c in range(1, C + 1)] for r in range(1, R + 1)]
-
-    # Fill merged ranges with the top-left value
-    for merged in ws.merged_cells.ranges:
-        v = ws.cell(row=merged.min_row, column=merged.min_col).value
-        for r in range(merged.min_row, merged.max_row + 1):
-            for c in range(merged.min_col, merged.max_col + 1):
-                if grid[r - 1][c - 1] in (None, ""):
-                    grid[r - 1][c - 1] = v
-    return grid
-
-
-def _find_cell_exact(grid: List[List[Any]], target: str) -> Optional[Tuple[int, int]]:
-    t = target.strip().lower()
-    for r, row in enumerate(grid):
-        for c, v in enumerate(row):
-            if _norm(v).lower() == t:
-                return r, c
-    return None
-
-
+# =========================
+# Excel extractors
+# =========================
 @dataclass
 class IndicadoresOut:
-    patients: pd.DataFrame  # columns: month, value
-    insured: pd.DataFrame   # columns: month, value
+    patients: pd.DataFrame
+    insured: pd.DataFrame
+    months: List[str]
     debug: Dict[str, Any]
 
 
 def extract_indicadores(ws: Worksheet) -> IndicadoresOut:
-    grid = _build_grid_with_merges(ws)
-    if not grid:
-        raise ValueError("Hoja 'Indicadores' vacía o ilegible.")
+    # Read a reasonable region (sheet is small)
+    matrix: List[List[Any]] = []
+    for r_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if r_idx > 60:
+            break
+        matrix.append(list(row))
 
-    header = _find_cell_exact(grid, "Estadistica")
-    if not header:
-        raise ValueError('No encontré "Estadistica" en Indicadores.')
+    # Find "Estadistica"
+    header_pos: Optional[Tuple[int, int]] = None
+    for r in range(len(matrix)):
+        for c in range(min(len(matrix[r]), 80)):
+            if norm_text(matrix[r][c]) == "estadistica":
+                header_pos = (r, c)
+                break
+        if header_pos:
+            break
+    if not header_pos:
+        raise ValueError('No encontré "Estadistica" en la hoja Indicadores.')
 
-    hr, hc = header
+    hr, hc = header_pos
+
+    # Parse months to the right
     months: List[Tuple[int, str]] = []
-    for c in range(hc + 1, len(grid[hr])):
-        iso = _parse_month_to_iso(grid[hr][c])
+    for c in range(hc + 1, len(matrix[hr])):
+        iso = parse_month_to_iso(matrix[hr][c])
         if iso:
             months.append((c, iso))
     if not months:
         raise ValueError("No pude parsear meses en Indicadores (fila de 'Estadistica').")
 
-    ppos = _find_cell_exact(grid, "No. de Pacientes")
-    spos = _find_cell_exact(grid, "Seguro")
-    if not ppos:
+    # Find rows for "No. de Pacientes" and "Seguro"
+    p_row = None
+    s_row = None
+    for r in range(len(matrix)):
+        for c in range(min(len(matrix[r]), 30)):
+            if norm_text(matrix[r][c]) == norm_text("No. de Pacientes"):
+                p_row = r
+            if norm_text(matrix[r][c]) == norm_text("Seguro"):
+                s_row = r
+    if p_row is None:
         raise ValueError('No encontré "No. de Pacientes" en Indicadores.')
-    if not spos:
+    if s_row is None:
         raise ValueError('No encontré "Seguro" en Indicadores.')
 
-    def row_series(row_idx: int) -> pd.DataFrame:
-        rows = []
+    def read_series(row_idx: int) -> pd.DataFrame:
+        out = []
+        row = matrix[row_idx]
         for c, iso in months:
-            v = grid[row_idx][c]
+            if c >= len(row):
+                continue
+            v = row[c]
             try:
-                val = float(v) if v is not None and _norm(v) != "" else None
+                val = float(v) if v is not None and str(v).strip() != "" else None
             except Exception:
                 val = None
             if val is not None:
-                rows.append({"month": iso, "value": val})
-        return pd.DataFrame(rows).sort_values("month")
+                out.append({"month": iso, "value": val})
+        return pd.DataFrame(out).sort_values("month")
 
-    patients = row_series(ppos[0])
-    insured = row_series(spos[0])
+    patients = read_series(p_row)
+    insured = read_series(s_row)
 
     return IndicadoresOut(
         patients=patients,
         insured=insured,
-        debug={"months": [m for _, m in months], "pPos": {"r": ppos[0], "c": ppos[1]}, "sPos": {"r": spos[0], "c": spos[1]}},
+        months=[m for _, m in months],
+        debug={"header": {"r": hr + 1, "c": hc + 1}, "p_row": p_row + 1, "s_row": s_row + 1},
     )
 
 
 @dataclass
 class SpecialtiesOut:
     months: List[str]
-    series_by_specialty: Dict[str, pd.DataFrame]  # label -> df(month,value)
+    series_by_specialty: Dict[str, pd.DataFrame]
 
 
 def extract_medicos_por_especialidad(ws: Worksheet) -> SpecialtiesOut:
-    # Convert worksheet values to DataFrame
-    data = list(ws.values)
-    aoa = pd.DataFrame(data).fillna(value=pd.NA)
+    # Convert to matrix (first ~300 rows enough)
+    matrix: List[List[Any]] = []
+    for r_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if r_idx > 300:
+            break
+        matrix.append(list(row))
 
+    # find row labels cell (Row Labels / Etiquetas de fila)
     header_row = None
     row_labels_col = None
     first_date_col = None
+    label_candidates = {"row labels", "rowlabels", "etiquetas de fila", "etiquetasdefila"}
 
-    scan_rows = min(50, len(aoa))
-    for r in range(scan_rows):
-        row = aoa.iloc[r].astype(object).tolist()
-        for c, v in enumerate(row):
-            if _norm(v).lower() == "row labels":
+    for r in range(min(80, len(matrix))):
+        row = matrix[r]
+        for c in range(min(len(row), 40)):
+            v = norm_text(row[c])
+            if v in label_candidates:
                 # find first month column to the right
                 for cc in range(c + 1, len(row)):
-                    iso = _parse_month_to_iso(row[cc])
+                    iso = parse_month_to_iso(row[cc])
                     if iso:
                         header_row = r
                         row_labels_col = c
@@ -358,32 +368,40 @@ def extract_medicos_por_especialidad(ws: Worksheet) -> SpecialtiesOut:
             break
 
     if header_row is None or row_labels_col is None or first_date_col is None:
-        raise ValueError('No encontré encabezado de pivot en "Medicos por Especialidad" (Row Labels + fechas).')
+        raise ValueError('No encontré el encabezado del pivote en "Medicos por Especialidad" (Row Labels + fechas).')
 
-    header_vals = aoa.iloc[header_row].astype(object).tolist()
+    # months
     months: List[Tuple[int, str]] = []
+    header_vals = matrix[header_row]
     for c in range(first_date_col, len(header_vals)):
-        iso = _parse_month_to_iso(header_vals[c])
+        iso = parse_month_to_iso(header_vals[c])
         if iso:
             months.append((c, iso))
     if not months:
         raise ValueError('No pude parsear meses en "Medicos por Especialidad".')
 
+    # read rows until grand total / total general
     series: Dict[str, pd.DataFrame] = {}
-    for r in range(header_row + 1, len(aoa)):
-        label = _norm(aoa.iat[r, row_labels_col])
+    end_markers = {"grand total", "total general"}
+
+    for r in range(header_row + 1, len(matrix)):
+        label = "" if row_labels_col >= len(matrix[r]) else str(matrix[r][row_labels_col] or "").strip()
         if not label:
             continue
-        if "grand total" in label.lower():
+        if norm_text(label) in end_markers or any(m in norm_text(label) for m in end_markers):
             break
 
         vals = []
+        row = matrix[r]
         for c, iso in months:
-            v = aoa.iat[r, c] if c < aoa.shape[1] else pd.NA
-            try:
-                val = float(v) if v is not None and _norm(v) != "" and v is not pd.NA else None
-            except Exception:
+            if c >= len(row):
                 val = None
+            else:
+                v = row[c]
+                try:
+                    val = float(v) if v is not None and str(v).strip() != "" else None
+                except Exception:
+                    val = None
             vals.append({"month": iso, "value": val})
         series[label] = pd.DataFrame(vals)
 
@@ -413,9 +431,9 @@ def prev_year_iso(iso: str) -> str:
 
 
 def find_matching_specialty_label(all_labels: List[str], match_tokens: List[str]) -> Optional[str]:
-    tokens = [t.lower() for t in match_tokens]
+    tokens = [norm_text(t) for t in match_tokens]
     for lbl in all_labels:
-        L = lbl.lower()
+        L = norm_text(lbl)
         if any(t in L for t in tokens):
             return lbl
     return None
@@ -494,13 +512,6 @@ def get_actual(actual_source: str, ctx: ExcelContext) -> Optional[float]:
     return None
 
 
-def get_sheet_by_name(wb, wanted: str):
-    for name in wb.sheetnames:
-        if name.strip().lower() == wanted.strip().lower():
-            return wb[name]
-    return None
-
-
 def build_kpi_table(eje_key: str, ctx: ExcelContext, targets_for_period: Dict[str, Any]) -> pd.DataFrame:
     rows = []
     for item in KPI_CONFIG[eje_key]:
@@ -510,10 +521,9 @@ def build_kpi_table(eje_key: str, ctx: ExcelContext, targets_for_period: Dict[st
         ratio = (actual / target) if (actual is not None and target not in (None, 0, "")) else None
         sem_text, sem_tone = traffic_light(ratio)
         compliance = fmt_pct(ratio) if ratio is not None else "—"
-
         actual_disp = fmt_pct(actual) if item["unit"] == "%" else fmt_int(actual)
 
-        # Helpful hint for the key specialties KPI (breakdown)
+        # breakdown hint for specialties KPI
         extra = ""
         if item["actualSource"] == "key_specialties_sum":
             parts = []
@@ -521,17 +531,19 @@ def build_kpi_table(eje_key: str, ctx: ExcelContext, targets_for_period: Dict[st
                 parts.append(f"{lab}: {'N/D' if rv is None else int(rv)}")
             extra = " · ".join(parts)
 
+        estrategia = item["estrategia"] + (f" | Desglose: {extra}" if extra else "")
+
         rows.append({
             "KPI_ID": item["id"],
             "Indicador": item["indicador"],
-            "Estrategia": item["estrategia"] + (f"  |  Desglose: {extra}" if extra else ""),
+            "Estrategia": estrategia,
             "Unidad": item["unit"],
             "Meta": float(target) if str(target).strip() != "" else None,
             "Real": actual_disp,
             "Cumplimiento": compliance,
             "Semáforo": sem_text,
-            "_sem_tone": sem_tone,
-            "_actual_is_missing": (actual is None and item["actualSource"] == "not_in_excel"),
+            "_tone": sem_tone,
+            "_missing": (actual is None and item["actualSource"] == "not_in_excel"),
         })
     return pd.DataFrame(rows)
 
@@ -548,41 +560,63 @@ def apply_targets_edits(df_editor: pd.DataFrame, targets_for_period: Dict[str, A
     return targets_for_period
 
 
+def iso_to_label(iso: str) -> str:
+    dt = pd.to_datetime(iso, errors="coerce")
+    if pd.isna(dt):
+        return iso
+    meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+    return f"{meses[int(dt.month)-1]} {dt.year}"
+
+
 # =========================
-# Sidebar (controls)
+# Cache parsed Excel (fast reruns)
+# =========================
+@st.cache_data(show_spinner=False)
+def parse_excel(file_bytes: bytes) -> Dict[str, Any]:
+    # read_only=True to avoid pivot cache overhead / timeouts
+    wb = load_workbook(BytesIO(file_bytes), data_only=True, read_only=True, keep_links=False)
+
+    # Case-insensitive sheet match
+    def get_sheet(wanted: str):
+        w = wanted.strip().lower()
+        for name in wb.sheetnames:
+            if name.strip().lower() == w:
+                return wb[name]
+        return None
+
+    ws_ind = get_sheet("Indicadores")
+    ws_spec = get_sheet("Medicos por Especialidad")
+
+    if ws_ind is None:
+        raise ValueError('No existe hoja "Indicadores".')
+    if ws_spec is None:
+        raise ValueError('No existe hoja "Medicos por Especialidad".')
+
+    ind_out = extract_indicadores(ws_ind)
+    spec_out = extract_medicos_por_especialidad(ws_spec)
+
+    return {
+        "sheetnames": wb.sheetnames,
+        "indicadores": ind_out,
+        "specialties": spec_out,
+    }
+
+
+# =========================
+# Sidebar (Upload + Period + Targets)
 # =========================
 st.sidebar.markdown("## CRMBI Comercial")
-st.sidebar.caption("Dashboard BI · Excel (Indicadores + Médicos por Especialidad) · Metas editables por periodo")
-
-today = pd.Timestamp.today()
-month_labels = [
-    "Enero","Febrero","Marzo","Abril","Mayo","Junio",
-    "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
-]
-
-month = st.sidebar.selectbox(
-    "Mes",
-    options=list(range(1, 13)),
-    index=int(today.month) - 1,
-    format_func=lambda m: month_labels[m - 1],
-)
-year = st.sidebar.selectbox("Año", options=list(range(today.year - 3, today.year + 2)), index=3)
-
-period_key = f"{year}-{month:02d}"
-iso = f"{year}-{month:02d}-01"
+st.sidebar.caption("Dashboard BI · Excel → KPIs + Tendencias · Metas por periodo")
 
 uploaded = st.sidebar.file_uploader("Excel (.xlsx)", type=["xlsx"])
 
 st.sidebar.divider()
 st.sidebar.markdown("### Metas (Targets)")
 
-cA, cB = st.sidebar.columns(2)
-with cA:
-    if st.button("Reset metas periodo", use_container_width=True):
-        st.session_state.targets[period_key] = {}
-        st.session_state.status = f"Metas reseteadas para {period_key}."
-
-with cB:
+colA, colB = st.sidebar.columns(2)
+with colA:
+    reset_btn = st.button("Reset periodo", use_container_width=True)
+with colB:
     download_json_button("Export metas", st.session_state.targets, filename="crmbi_targets.json")
 
 import_file = st.sidebar.file_uploader("Import metas (JSON)", type=["json"], key="import_json")
@@ -598,43 +632,57 @@ if import_file is not None:
 # =========================
 # Header
 # =========================
-l, r = st.columns([0.78, 0.22], vertical_alignment="center")
-with l:
+hl, hr = st.columns([0.78, 0.22], vertical_alignment="center")
+with hl:
     st.title("CRMBI Comercial (Por EJE)")
-    st.markdown('<div class="muted">Auto desde Excel: Indicadores + Médicos por Especialidad · Metas editables · Mes/Año</div>', unsafe_allow_html=True)
-
-with r:
+    st.markdown('<div class="muted">Fuente: Indicadores + Médicos por Especialidad · BI Dashboard · Metas editables</div>', unsafe_allow_html=True)
+with hr:
     st.markdown("#### Estado")
     st.write(st.session_state.status)
 
-# =========================
-# Load Excel + compute
-# =========================
 if uploaded is None:
     badge("SIN EXCEL", "gray")
     st.info("Sube el Excel para habilitar KPIs y gráficos.")
     st.stop()
 
+# =========================
+# Parse Excel
+# =========================
 try:
-    data = uploaded.read()
-    wb = load_workbook(BytesIO(data), data_only=True)
+    file_bytes = uploaded.getvalue()
+    parsed = parse_excel(file_bytes)
+    ind_out: IndicadoresOut = parsed["indicadores"]
+    spec_out: SpecialtiesOut = parsed["specialties"]
 
-    ws_ind = get_sheet_by_name(wb, "Indicadores")
-    if ws_ind is None:
-        raise ValueError('No existe hoja "Indicadores".')
+    available_periods = ind_out.months[:]  # 'YYYY-MM-01'
+    if not available_periods:
+        raise ValueError("No encontré meses válidos en Indicadores.")
 
-    ws_spec = get_sheet_by_name(wb, "Medicos por Especialidad")
-    if ws_spec is None:
-        raise ValueError('No existe hoja "Medicos por Especialidad".')
+    # default to latest month in Indicadores
+    available_periods_sorted = sorted(available_periods)
+    default_iso = available_periods_sorted[-1]
 
-    ind_out = extract_indicadores(ws_ind)
-    spec_out = extract_medicos_por_especialidad(ws_spec)
+    # Period selector (only valid months from your Excel)
+    st.sidebar.divider()
+    st.sidebar.markdown("### Periodo (desde Excel)")
+    iso_selected = st.sidebar.selectbox(
+        "Periodo",
+        options=available_periods_sorted,
+        index=available_periods_sorted.index(default_iso),
+        format_func=iso_to_label,
+    )
+
+    period_key = iso_selected[:7]  # YYYY-MM
+
+    if reset_btn:
+        st.session_state.targets[period_key] = {}
+        st.session_state.status = f"Metas reseteadas para {period_key}."
 
     ctx = build_context(
         ind_patients=ind_out.patients,
         ind_insured=ind_out.insured,
         spec_series=spec_out.series_by_specialty,
-        iso=iso,
+        iso=iso_selected,
     )
 
     badge("EXCEL CARGADO", "green")
@@ -666,11 +714,11 @@ with c2:
 with c3:
     kpi_card("% Seguro / Pacientes", fmt_pct(ctx.insured_rate), "Seguro ÷ Pacientes")
 
-st.divider()
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
 
 # =========================
-# Charts (NO Plotly)
+# Charts (Streamlit native)
 # =========================
 ch1, ch2 = st.columns(2)
 
@@ -702,14 +750,13 @@ st.caption("Conteo automático de médicos por especialidad en el mes selecciona
 df_bar = pd.DataFrame(
     {"Especialidad": ctx.key_breakdown["labels"], "Médicos": ctx.key_breakdown["values"]}
 ).set_index("Especialidad")
-
 st.bar_chart(df_bar["Médicos"])
 
-st.divider()
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
 
 # =========================
-# Ejes in tabs
+# Ejes (Tabs)
 # =========================
 targets_for_period = st.session_state.targets.get(period_key, {})
 
@@ -726,18 +773,34 @@ eje_meta = {
     "eje3": "Objetivo: Incrementar pacientes asegurados y relaciones con brokers.",
 }
 
+def eje_summary(df: pd.DataFrame):
+    tones = df["_tone"].value_counts().to_dict()
+    greens = tones.get("green", 0)
+    yellows = tones.get("yellow", 0)
+    reds = tones.get("red", 0)
+    nd = tones.get("gray", 0)
+    a, b, c, d = st.columns(4)
+    with a:
+        badge(f"🟢 {greens} Verde", "green")
+    with b:
+        badge(f"🟡 {yellows} Amarillo", "yellow")
+    with c:
+        badge(f"🔴 {reds} Rojo", "red")
+    with d:
+        badge(f"⚪ {nd} N/D", "gray")
+
+
 for idx, eje_key in enumerate(["eje1", "eje2", "eje3"]):
     with tabs[idx]:
         st.markdown(f"**{eje_meta[eje_key]}**")
 
         df = build_kpi_table(eje_key, ctx, targets_for_period)
+        eje_summary(df)
 
-        missing = df[df["_actual_is_missing"] == True]
+        missing = df[df["_missing"] == True]
         if len(missing) > 0:
-            badge(f"{len(missing)} KPI(s) N/D (no existe dato en Excel)", "yellow")
-            st.caption("Puedes usar metas, pero el 'Real' depende de que exista esa métrica en el Excel.")
+            st.caption("Nota: algunos KPIs están N/D porque no existe ese dato en el Excel (se mantienen como metas manuales).")
 
-        # Editor view: editable only "Meta"
         show = df[["KPI_ID", "Indicador", "Estrategia", "Unidad", "Meta", "Real", "Cumplimiento", "Semáforo"]].copy()
 
         edited = st.data_editor(
@@ -748,8 +811,8 @@ for idx, eje_key in enumerate(["eje1", "eje2", "eje3"]):
             column_config={
                 "Meta": st.column_config.NumberColumn(
                     "Meta (editable)",
-                    help="Para %, usa decimal: 0.35 = 35%. Para conteos, usa enteros.",
-                    step=1.0,
+                    help="Para %, usa decimal: 0.35 = 35%.",
+                    step=0.01,  # sirve para % y también permite conteos (puedes teclear)
                 ),
                 "Estrategia": st.column_config.TextColumn("Estrategia", width="large"),
             },
@@ -764,18 +827,23 @@ for idx, eje_key in enumerate(["eje1", "eje2", "eje3"]):
                 st.session_state.status = f"Metas guardadas para {period_key}."
                 st.success("Metas guardadas.")
         with b2:
-            st.caption("Tip: Exporta metas (JSON) para conservarlas en Streamlit Cloud o reutilizarlas.")
+            st.caption("Tip: Exporta metas (JSON) para conservarlas en Streamlit Cloud o reutilizarlas entre equipos.")
 
 with tabs[3]:
     st.subheader("Debug (Excel)")
-    st.caption("Hojas detectadas, meses parseados, y muestra de especialidades.")
+    st.caption("Estructura detectada y muestra de especialidades.")
     st.json({
-        "sheets": wb.sheetnames,
-        "indicadores": ind_out.debug,
+        "sheetnames": parsed.get("sheetnames", []),
+        "indicadores": {
+            "months_count": len(ind_out.months),
+            "months_first_last": [ind_out.months[0], ind_out.months[-1]] if ind_out.months else [],
+            "debug": ind_out.debug,
+        },
         "medicos_por_especialidad": {
-            "months": spec_out.months[:12],
-            "sample_specialties": list(spec_out.series_by_specialty.keys())[:20],
+            "months_count": len(spec_out.months),
+            "months_first_last": [spec_out.months[0], spec_out.months[-1]] if spec_out.months else [],
+            "sample_specialties": list(spec_out.series_by_specialty.keys())[:25],
         },
         "selected_period": period_key,
-        "iso": iso,
+        "iso_selected": iso_selected,
     })
