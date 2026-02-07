@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
+import plotly.graph_objects as go
 
 # Configuración de página
 st.set_page_config(page_title="CRMBI Comercial", layout="wide")
@@ -22,13 +22,15 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- LOGICA DE PROCESAMIENTO ---
-# Usamos cache para no recargar el Excel cada vez que tocas un botón
-@st.cache_data 
+@st.cache_data
 def load_data(file):
-    # Cargar hojas
-    df_ind = pd.read_excel(file, sheet_name="Indicadores", header=None)
-    df_spec = pd.read_excel(file, sheet_name="Medicos por Especialidad")
-    return df_ind, df_spec
+    # Cargar hojas - Se usa openpyxl como motor implícito
+    try:
+        df_ind = pd.read_excel(file, sheet_name="Indicadores", header=None)
+        df_spec = pd.read_excel(file, sheet_name="Medicos por Especialidad")
+        return df_ind, df_spec
+    except Exception as e:
+        return None, None
 
 # --- SIDEBAR / FILTROS ---
 st.sidebar.title("Configuración")
@@ -39,17 +41,18 @@ selected_month = st.sidebar.selectbox("Mes",
      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"])
 
 if uploaded_file:
-    try:
-        df_ind, df_spec = load_data(uploaded_file)
-        
+    df_ind, df_spec = load_data(uploaded_file)
+    
+    if df_ind is not None:
+        # --- DASHBOARD ---
         st.title(f"📊 Dashboard CRMBI - {selected_month} {selected_year}")
         
         # --- SECCIÓN KPI PRINCIPALES ---
         col1, col2, col3, col4 = st.columns(4)
         
-        # Ejemplo de datos (PLACEHOLDERS - Aquí irá tu lógica real luego)
+        # Ejemplo de datos (PLACEHOLDER - Aquí conectarás tus celdas reales luego)
         val_pacientes = 1250 
-        val_seguro = 450
+        val_seguro = 450    
         pct_seguro = (val_seguro / val_pacientes) * 100
 
         with col1:
@@ -68,7 +71,7 @@ if uploaded_file:
         
         with c1:
             st.subheader("📈 Tendencia de Pacientes")
-            # Datos de ejemplo
+            # Datos dummy para visualización
             fig_line = px.line(x=["Ene", "Feb", "Mar", "Abr"], y=[1100, 1200, 1150, 1250], markers=True)
             st.plotly_chart(fig_line, use_container_width=True)
 
@@ -88,7 +91,7 @@ if uploaded_file:
                 st.data_editor(
                     df_eje,
                     column_config={
-                        "Meta": st.column_config.NumberColumn(help="Editable"),
+                        "Meta": st.column_config.NumberColumn(help="Puedes editar la meta aquí"),
                         "Cumplimiento": st.column_config.ProgressColumn(format="%.1f%%", min_value=0, max_value=100),
                         "Semaforo": st.column_config.TextColumn("Estado")
                     },
@@ -97,21 +100,21 @@ if uploaded_file:
                     use_container_width=True
                 )
 
-        # Datos Dummy
+        # Datos para Eje 1
         eje1_data = [
             {"Indicador": "Atracción Médicos Nuevos", "Meta": 25, "Real": 20, "Cumplimiento": 80, "Semaforo": "🟡"},
             {"Indicador": "Atención 1:1 Médicos", "Meta": 80, "Real": 85, "Cumplimiento": 100, "Semaforo": "🟢"},
         ]
         render_eje_table("EJE 1 · MÉDICOS Y PACIENTES", eje1_data)
 
+        # Datos para Eje 3
         eje3_data = [
             {"Indicador": "Pacientes de Seguros", "Meta": 33, "Real": 15, "Cumplimiento": 45, "Semaforo": "🔴"},
         ]
         render_eje_table("EJE 3 · SEGUROS Y BROKERS", eje3_data)
-
-    except Exception as e:
-        st.error(f"Error al leer el archivo: {e}")
-        st.warning("Asegúrate de que el Excel tenga las hojas 'Indicadores' y 'Medicos por Especialidad'.")
+    
+    else:
+        st.error("Error leyendo el Excel. Asegúrate de que tenga las hojas 'Indicadores' y 'Medicos por Especialidad'.")
 
 else:
-    st.info("👋 Por favor, sube el archivo Excel en la barra lateral.")
+    st.info("
