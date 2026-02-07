@@ -6,7 +6,6 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 from dateutil.relativedelta import relativedelta
 from openpyxl import load_workbook
@@ -18,9 +17,42 @@ from openpyxl.worksheet.worksheet import Worksheet
 # =========================
 st.set_page_config(page_title="CRMBI Comercial (Por EJE)", layout="wide")
 
+# Light BI-ish polish (no extra deps)
+st.markdown(
+    """
+    <style>
+      .block-container { padding-top: 1.25rem; }
+      .kpi-card {
+        border-radius: 16px; padding: 14px 16px; background: #ffffff;
+        box-shadow: 0 1px 10px rgba(15,23,42,.06);
+        border: 1px solid rgba(15,23,42,.06);
+      }
+      .kpi-title {
+        font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
+        color: #64748b; font-weight: 800;
+      }
+      .kpi-value {
+        font-size: 34px; font-weight: 900; color: #0f172a;
+        line-height: 1.1; margin-top: 6px;
+      }
+      .kpi-sub { font-size: 12px; color: #64748b; margin-top: 4px; }
+      .badge {
+        display:inline-block; padding:4px 10px; border-radius:999px;
+        font-size:12px; font-weight:700; border:1px solid transparent;
+      }
+      .badge-green { background:#e8f7ee; color:#0f5132; border-color:#b7e4c7; }
+      .badge-yellow{ background:#fff7e6; color:#664d03; border-color:#ffe0a3; }
+      .badge-red   { background:#fdecec; color:#842029; border-color:#f5c2c7; }
+      .badge-gray  { background:#eef2f7; color:#334155; border-color:#dbe3ef; }
+      .muted { color:#64748b; font-size: 13px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # =========================
-# CONFIG (your business logic)
+# CONFIG (business logic)
 # =========================
 KEY_SPECIALTIES = [
     {"id": "ORTOPEDIA",    "match": ["ORTOPEDIA"]},
@@ -62,7 +94,7 @@ KPI_CONFIG: Dict[str, List[Dict[str, Any]]] = {
             "indicador": "Rentabilidad (proxy)",
             "estrategia": "% Seguro / Pacientes (Indicadores).",
             "unit": "%",
-            "defaultTarget": 0.35,  # decimal
+            "defaultTarget": 0.35,  # decimal: 0.35 = 35%
             "actualSource": "indicadores_insured_rate",
         },
     ],
@@ -114,7 +146,7 @@ KPI_CONFIG: Dict[str, List[Dict[str, Any]]] = {
 
 
 # =========================
-# Session state (targets, status)
+# Session state
 # =========================
 if "targets" not in st.session_state:
     # { "YYYY-MM": {kpi_id: meta_value} }
@@ -128,42 +160,22 @@ if "status" not in st.session_state:
 # UI helpers
 # =========================
 def badge(text: str, tone: str = "gray"):
-    colors = {
-        "green": ("#e8f7ee", "#0f5132", "#b7e4c7"),
-        "yellow": ("#fff7e6", "#664d03", "#ffe0a3"),
-        "red": ("#fdecec", "#842029", "#f5c2c7"),
-        "gray": ("#eef2f7", "#334155", "#dbe3ef"),
-        "blue": ("#e8f0ff", "#1e3a8a", "#c7d2fe"),
-    }
-    bg, fg, br = colors.get(tone, colors["gray"])
-    st.markdown(
-        f"""
-        <span style="
-          display:inline-block; padding:4px 10px; border-radius:999px;
-          background:{bg}; color:{fg}; border:1px solid {br};
-          font-size:12px; font-weight:600;">
-          {text}
-        </span>
-        """,
-        unsafe_allow_html=True,
-    )
+    tone_class = {
+        "green": "badge badge-green",
+        "yellow": "badge badge-yellow",
+        "red": "badge badge-red",
+        "gray": "badge badge-gray",
+    }.get(tone, "badge badge-gray")
+    st.markdown(f'<span class="{tone_class}">{text}</span>', unsafe_allow_html=True)
 
 
 def kpi_card(title: str, value: str, sub: str = ""):
     st.markdown(
         f"""
-        <div style="
-          border-radius:16px; padding:14px 16px; background:#ffffff;
-          box-shadow:0 1px 10px rgba(15,23,42,.06); border:1px solid rgba(15,23,42,.06);">
-          <div style="font-size:12px; letter-spacing:.04em; text-transform:uppercase; color:#64748b; font-weight:700;">
-            {title}
-          </div>
-          <div style="font-size:34px; font-weight:900; color:#0f172a; line-height:1.1; margin-top:6px;">
-            {value}
-          </div>
-          <div style="font-size:12px; color:#64748b; margin-top:4px;">
-            {sub}
-          </div>
+        <div class="kpi-card">
+          <div class="kpi-title">{title}</div>
+          <div class="kpi-value">{value}</div>
+          <div class="kpi-sub">{sub}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -204,12 +216,12 @@ def fmt_pct(x: Optional[float]) -> str:
 
 def traffic_light(ratio: Optional[float]) -> Tuple[str, str]:
     if ratio is None:
-        return ("N/D", "gray")
+        return ("⚪ N/D", "gray")
     if ratio >= 1:
-        return ("VERDE", "green")
+        return ("🟢 VERDE", "green")
     if ratio >= 0.8:
-        return ("AMARILLO", "yellow")
-    return ("ROJO", "red")
+        return ("🟡 AMARILLO", "yellow")
+    return ("🔴 ROJO", "red")
 
 
 # =========================
@@ -242,6 +254,7 @@ def _build_grid_with_merges(ws: Worksheet) -> List[List[Any]]:
     R, C = ws.max_row or 0, ws.max_column or 0
     grid = [[ws.cell(row=r, column=c).value for c in range(1, C + 1)] for r in range(1, R + 1)]
 
+    # Fill merged ranges with the top-left value
     for merged in ws.merged_cells.ranges:
         v = ws.cell(row=merged.min_row, column=merged.min_col).value
         for r in range(merged.min_row, merged.max_row + 1):
@@ -262,8 +275,8 @@ def _find_cell_exact(grid: List[List[Any]], target: str) -> Optional[Tuple[int, 
 
 @dataclass
 class IndicadoresOut:
-    patients: pd.DataFrame
-    insured: pd.DataFrame
+    patients: pd.DataFrame  # columns: month, value
+    insured: pd.DataFrame   # columns: month, value
     debug: Dict[str, Any]
 
 
@@ -310,18 +323,20 @@ def extract_indicadores(ws: Worksheet) -> IndicadoresOut:
     return IndicadoresOut(
         patients=patients,
         insured=insured,
-        debug={"months": [m for _, m in months], "pPos": ppos, "sPos": spos},
+        debug={"months": [m for _, m in months], "pPos": {"r": ppos[0], "c": ppos[1]}, "sPos": {"r": spos[0], "c": spos[1]}},
     )
 
 
 @dataclass
 class SpecialtiesOut:
     months: List[str]
-    series_by_specialty: Dict[str, pd.DataFrame]
+    series_by_specialty: Dict[str, pd.DataFrame]  # label -> df(month,value)
 
 
 def extract_medicos_por_especialidad(ws: Worksheet) -> SpecialtiesOut:
-    aoa = pd.DataFrame(ws.values).fillna(value=pd.NA)
+    # Convert worksheet values to DataFrame
+    data = list(ws.values)
+    aoa = pd.DataFrame(data).fillna(value=pd.NA)
 
     header_row = None
     row_labels_col = None
@@ -332,6 +347,7 @@ def extract_medicos_por_especialidad(ws: Worksheet) -> SpecialtiesOut:
         row = aoa.iloc[r].astype(object).tolist()
         for c, v in enumerate(row):
             if _norm(v).lower() == "row labels":
+                # find first month column to the right
                 for cc in range(c + 1, len(row)):
                     iso = _parse_month_to_iso(row[cc])
                     if iso:
@@ -494,15 +510,22 @@ def build_kpi_table(eje_key: str, ctx: ExcelContext, targets_for_period: Dict[st
 
         ratio = (actual / target) if (actual is not None and target not in (None, 0, "")) else None
         sem_text, sem_tone = traffic_light(ratio)
-
         compliance = fmt_pct(ratio) if ratio is not None else "—"
 
         actual_disp = fmt_pct(actual) if item["unit"] == "%" else fmt_int(actual)
 
+        # Helpful hint for the key specialties KPI (breakdown)
+        extra = ""
+        if item["actualSource"] == "key_specialties_sum":
+            parts = []
+            for lab, rv in zip(ctx.key_breakdown["labels"], ctx.key_breakdown["rawValues"]):
+                parts.append(f"{lab}: {'N/D' if rv is None else int(rv)}")
+            extra = " · ".join(parts)
+
         rows.append({
             "KPI_ID": item["id"],
             "Indicador": item["indicador"],
-            "Estrategia": item["estrategia"],
+            "Estrategia": item["estrategia"] + (f"  |  Desglose: {extra}" if extra else ""),
             "Unidad": item["unit"],
             "Meta": float(target) if str(target).strip() != "" else None,
             "Real": actual_disp,
@@ -530,10 +553,9 @@ def apply_targets_edits(df_editor: pd.DataFrame, targets_for_period: Dict[str, A
 # Sidebar (controls)
 # =========================
 st.sidebar.markdown("## CRMBI Comercial")
-st.sidebar.caption("BI Dashboard · Excel (Indicadores + Médicos por Especialidad) · Metas editables por periodo")
+st.sidebar.caption("Dashboard BI · Excel (Indicadores + Médicos por Especialidad) · Metas editables por periodo")
 
 today = pd.Timestamp.today()
-months = list(range(1, 13))
 month_labels = [
     "Enero","Febrero","Marzo","Abril","Mayo","Junio",
     "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
@@ -541,9 +563,9 @@ month_labels = [
 
 month = st.sidebar.selectbox(
     "Mes",
-    options=months,
+    options=list(range(1, 13)),
     index=int(today.month) - 1,
-    format_func=lambda m: month_labels[m-1],
+    format_func=lambda m: month_labels[m - 1],
 )
 year = st.sidebar.selectbox("Año", options=list(range(today.year - 3, today.year + 2)), index=3)
 
@@ -580,11 +602,11 @@ if import_file is not None:
 l, r = st.columns([0.78, 0.22], vertical_alignment="center")
 with l:
     st.title("CRMBI Comercial (Por EJE)")
-    st.caption("Auto desde Excel: Indicadores + Médicos por Especialidad · Metas editables · Mes/Año")
+    st.markdown('<div class="muted">Auto desde Excel: Indicadores + Médicos por Especialidad · Metas editables · Mes/Año</div>', unsafe_allow_html=True)
+
 with r:
     st.markdown("#### Estado")
     st.write(st.session_state.status)
-
 
 # =========================
 # Load Excel + compute
@@ -649,18 +671,20 @@ st.divider()
 
 
 # =========================
-# Charts
+# Charts (NO Plotly)
 # =========================
 ch1, ch2 = st.columns(2)
+
 with ch1:
     st.subheader("Tendencia: Pacientes")
     dfp = ind_out.patients.copy()
     if dfp.empty:
         st.info("Sin serie de pacientes en el Excel.")
     else:
-        fig = px.line(dfp, x="month", y="value", markers=True)
-        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=320)
-        st.plotly_chart(fig, use_container_width=True)
+        dfp2 = dfp.copy()
+        dfp2["month"] = pd.to_datetime(dfp2["month"], errors="coerce")
+        dfp2 = dfp2.dropna(subset=["month"]).sort_values("month").set_index("month")
+        st.line_chart(dfp2["value"])
 
 with ch2:
     st.subheader("Tendencia: Seguro")
@@ -668,17 +692,19 @@ with ch2:
     if dfi.empty:
         st.info("Sin serie de seguros en el Excel.")
     else:
-        fig = px.line(dfi, x="month", y="value", markers=True)
-        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=320)
-        st.plotly_chart(fig, use_container_width=True)
+        dfi2 = dfi.copy()
+        dfi2["month"] = pd.to_datetime(dfi2["month"], errors="coerce")
+        dfi2 = dfi2.dropna(subset=["month"]).sort_values("month").set_index("month")
+        st.line_chart(dfi2["value"])
 
 st.subheader("Especialidades clave (Médicos por Especialidad)")
 st.caption("Conteo automático de médicos por especialidad en el mes seleccionado (proxy de actividad).")
 
-df_bar = pd.DataFrame({"Especialidad": ctx.key_breakdown["labels"], "Médicos": ctx.key_breakdown["values"]})
-figb = px.bar(df_bar, x="Especialidad", y="Médicos")
-figb.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=320)
-st.plotly_chart(figb, use_container_width=True)
+df_bar = pd.DataFrame(
+    {"Especialidad": ctx.key_breakdown["labels"], "Médicos": ctx.key_breakdown["values"]}
+).set_index("Especialidad")
+
+st.bar_chart(df_bar["Médicos"])
 
 st.divider()
 
@@ -712,6 +738,7 @@ for idx, eje_key in enumerate(["eje1", "eje2", "eje3"]):
             badge(f"{len(missing)} KPI(s) N/D (no existe dato en Excel)", "yellow")
             st.caption("Puedes usar metas, pero el 'Real' depende de que exista esa métrica en el Excel.")
 
+        # Editor view: editable only "Meta"
         show = df[["KPI_ID", "Indicador", "Estrategia", "Unidad", "Meta", "Real", "Cumplimiento", "Semáforo"]].copy()
 
         edited = st.data_editor(
@@ -722,8 +749,8 @@ for idx, eje_key in enumerate(["eje1", "eje2", "eje3"]):
             column_config={
                 "Meta": st.column_config.NumberColumn(
                     "Meta (editable)",
-                    help="Para %, usa decimal: 0.35 = 35%",
-                    step=0.01,
+                    help="Para %, usa decimal: 0.35 = 35%. Para conteos, usa enteros.",
+                    step=1.0,
                 ),
                 "Estrategia": st.column_config.TextColumn("Estrategia", width="large"),
             },
