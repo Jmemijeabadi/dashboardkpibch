@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 
 # Configuración de página
 st.set_page_config(page_title="CRMBI Comercial", layout="wide")
@@ -24,8 +23,8 @@ st.markdown("""
 # --- LOGICA DE PROCESAMIENTO ---
 @st.cache_data
 def load_data(file):
-    # Cargar hojas - Se usa openpyxl como motor implícito
     try:
+        # Cargar hojas
         df_ind = pd.read_excel(file, sheet_name="Indicadores", header=None)
         df_spec = pd.read_excel(file, sheet_name="Medicos por Especialidad")
         return df_ind, df_spec
@@ -40,19 +39,19 @@ selected_month = st.sidebar.selectbox("Mes",
     ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"])
 
+# --- CUERPO PRINCIPAL ---
 if uploaded_file:
     df_ind, df_spec = load_data(uploaded_file)
     
     if df_ind is not None:
-        # --- DASHBOARD ---
         st.title(f"📊 Dashboard CRMBI - {selected_month} {selected_year}")
         
         # --- SECCIÓN KPI PRINCIPALES ---
         col1, col2, col3, col4 = st.columns(4)
         
-        # Ejemplo de datos (PLACEHOLDER - Aquí conectarás tus celdas reales luego)
+        # PLACEHOLDERS (Aquí conectarás tus datos reales)
         val_pacientes = 1250 
-        val_seguro = 450    
+        val_seguro = 450
         pct_seguro = (val_seguro / val_pacientes) * 100
 
         with col1:
@@ -71,7 +70,6 @@ if uploaded_file:
         
         with c1:
             st.subheader("📈 Tendencia de Pacientes")
-            # Datos dummy para visualización
             fig_line = px.line(x=["Ene", "Feb", "Mar", "Abr"], y=[1100, 1200, 1150, 1250], markers=True)
             st.plotly_chart(fig_line, use_container_width=True)
 
@@ -91,7 +89,7 @@ if uploaded_file:
                 st.data_editor(
                     df_eje,
                     column_config={
-                        "Meta": st.column_config.NumberColumn(help="Puedes editar la meta aquí"),
+                        "Meta": st.column_config.NumberColumn(help="Editable"),
                         "Cumplimiento": st.column_config.ProgressColumn(format="%.1f%%", min_value=0, max_value=100),
                         "Semaforo": st.column_config.TextColumn("Estado")
                     },
@@ -100,14 +98,12 @@ if uploaded_file:
                     use_container_width=True
                 )
 
-        # Datos para Eje 1
         eje1_data = [
             {"Indicador": "Atracción Médicos Nuevos", "Meta": 25, "Real": 20, "Cumplimiento": 80, "Semaforo": "🟡"},
             {"Indicador": "Atención 1:1 Médicos", "Meta": 80, "Real": 85, "Cumplimiento": 100, "Semaforo": "🟢"},
         ]
         render_eje_table("EJE 1 · MÉDICOS Y PACIENTES", eje1_data)
 
-        # Datos para Eje 3
         eje3_data = [
             {"Indicador": "Pacientes de Seguros", "Meta": 33, "Real": 15, "Cumplimiento": 45, "Semaforo": "🔴"},
         ]
@@ -117,4 +113,5 @@ if uploaded_file:
         st.error("Error leyendo el Excel. Asegúrate de que tenga las hojas 'Indicadores' y 'Medicos por Especialidad'.")
 
 else:
-    st.info("
+    # AQUÍ ESTABA EL ERROR: Asegúrate que esto esté en una sola línea
+    st.info("👋 Por favor, sube el archivo Excel en la barra lateral para visualizar los datos.")
