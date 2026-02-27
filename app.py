@@ -2,20 +2,19 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from datetime import datetime
-import numpy as np
 
 # ==========================================
 # 1. CONFIGURACIÓN ESTRATÉGICA Y CONSTANTES
 # ==========================================
 st.set_page_config(page_title="NewCityHospital BI | KO26", layout="wide", page_icon="🏥")
 
+# Palabras clave de respaldo (por si las columnas cambian de nombre en el futuro)
 KEYWORDS = {
     'DATE': ['mes ingreso', 'ingreso', 'fecha', 'mes'],
-    'REVENUE': ['cuenta ventas', 'cuenta full', 'importe', 'total', 'ingreso'],
+    'REVENUE': ['cuenta ventas', 'cuenta full', 'importe', 'total'],
     'SPECIALTY': ['especialidad grupo', 'especialidad', 'servicio'],
     'DOCTOR': ['medico grupo', 'medico', 'doctor'],
-    'PATIENT_ID': ['cuenta', '# cuenta', 'expediente', '#', 'paciente'],
+    'PATIENT_ID': ['cuenta', '# cuenta', 'expediente', 'paciente'],
     'TYPE': ['tipo'] 
 }
 
@@ -67,57 +66,87 @@ def format_money(val):
 
 @st.cache_data
 def process_data(file):
-    df = pd.read_excel(file)
-    
-    # Mapeo inteligente de columnas
-    col_map = {}
-    for col in df.columns:
-        col_lower = str(col).lower()
-        for key, words in KEYWORDS.items():
-            if any(w in col_lower for w in words) and key not in col_map:
-                col_map[key] = col
+    try:
+        # Detectar si es un Excel para buscar la hoja correcta, o si es un CSV plano
+        if file.name.endswith(('.xls', '.xlsx')):
+            xls = pd.ExcelFile(file)
+            target_sheet = xls.sheet_names[0]
+            for sheet in xls.sheet_names:
+                sheet_lower = sheet.lower()
+                if 'expediente' in sheet_lower or 'data' in sheet_lower or 'base' in sheet_lower:
+                    target_sheet = sheet
+                    break
+            df = pd.read_excel(xls, sheet_name=target_sheet)
+        else:
+            df = pd.read_csv(file)
+        
+        # Mapeo inteligente adaptado a la estructura exacta de NewCityHospital
+        col_map = {}
+        for col in df.columns:
+            col_lower = str(col).lower()
+            
+            if 'ingreso' in col_lower and 'mes' not in col_lower and 'DATE' not in col_map:
+                col_map['DATE'] = col
+            elif 'cuenta ventas' in col_lower and 'REVENUE' not in col_map:
+                col_map['REVENUE'] = col
+            elif 'especialidad grupo' in col_lower and 'SPECIALTY' not in col_map:
+                col_map['SPECIALTY'] = col
+            elif 'medico grupo' in col_lower and 'DOCTOR' not in col_map:
+                col_map['DOCTOR'] = col
+            elif col_lower == 'cuenta' and 'PATIENT_ID' not in col_map:
+                col_map['PATIENT_ID'] = col
+            elif 'tipo' in col_lower and 'TYPE' not in col_map:
+                col_map['TYPE'] = col
                 
-    if 'REVENUE' not in col_map or 'DATE' not in col_map:
-        st.error("No se encontraron las columnas clave (Fecha e Ingresos) en el Excel.")
+        # Fallback genérico por si no encontró alguna
+        for col in df.columns:
+            col_lower = str(col).lower()
+            for key, words in KEYWORDS.items():
+                if any(w in col_lower for w in words) and key not in col_map:
+                    col_map[key] = col
+
+        if 'REVENUE' not in col_map or 'DATE' not in col_map:
+            return pd.DataFrame() # Retorna vacío para activar la alerta
+
+        # Renombrar columnas a las variables del sistema
+        rename_dict = {v: k for k, v in col_map.items()}
+        df = df.rename(columns=rename_dict)
+        
+        # Limpieza y formateo de datos
+        df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
+        df = df.dropna(subset=['DATE'])
+        df['REVENUE'] = pd.to_numeric(df.get('REVENUE', 0).astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
+        df['SPECIALTY'] = df.get('SPECIALTY', 'Otros').fillna('Otros').astype(str).str.upper()
+        df['DOCTOR'] = df.get('DOCTOR', 'Desconocido').fillna('Desconocido').astype(str).str.upper()
+        df['PATIENT_ID'] = df.get('PATIENT_ID', df.index).fillna(df.index).astype(str)
+        df['TYPE'] = df.get('TYPE', 'Privado').fillna('Privado').astype(str).str.upper()
+
+        # Generar métricas derivadas
+        df['year'] = df['DATE'].dt.year
+        df['month'] = df['DATE'].dt.month
+        df['day'] = df['DATE'].dt.day
+        df['isKey'] = df['SPECIALTY'].apply(lambda x: any(k in x for k in ESP_CLAVES))
+        df['isEmpresa'] = df['TYPE'].apply(lambda x: any(k in x for k in ['EMPRESA', 'CONVENIO', 'COMPASS']))
+        df['isSeguro'] = df['TYPE'].apply(lambda x: any(k in x for k in ['SEGURO', 'METLIFE', 'GNP', 'PARTICULAR NACIONAL', 'PARTICULAR EXTRANJERO']))
+        
+        def get_segment(row):
+            if row['isEmpresa']: return 'Empresa'
+            if row['isSeguro']: return 'Seguro'
+            return 'Privado'
+        df['segment'] = df.apply(get_segment, axis=1)
+
+        return df
+
+    except Exception as e:
+        st.error(f"Error procesando el archivo: {e}")
         return pd.DataFrame()
 
-    # Renombrar columnas para facilitar el manejo
-    rename_dict = {v: k for k, v in col_map.items()}
-    df = df.rename(columns=rename_dict)
-    
-    # Limpieza básica
-    df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
-    df = df.dropna(subset=['DATE'])
-    df['REVENUE'] = pd.to_numeric(df.get('REVENUE', 0).astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
-    df['SPECIALTY'] = df.get('SPECIALTY', 'Otros').fillna('Otros').astype(str).str.upper()
-    df['DOCTOR'] = df.get('DOCTOR', 'Desconocido').fillna('Desconocido').astype(str).str.upper()
-    df['PATIENT_ID'] = df.get('PATIENT_ID', df.index).fillna(df.index).astype(str)
-    df['TYPE'] = df.get('TYPE', 'Privado').fillna('Privado').astype(str).str.upper()
-
-    # Columnas derivadas
-    df['year'] = df['DATE'].dt.year
-    df['month'] = df['DATE'].dt.month
-    df['day'] = df['DATE'].dt.day
-    df['isKey'] = df['SPECIALTY'].apply(lambda x: any(k in x for k in ESP_CLAVES))
-    df['isEmpresa'] = df['TYPE'].apply(lambda x: any(k in x for k in ['EMPRESA', 'CONVENIO', 'COMPASS']))
-    df['isSeguro'] = df['TYPE'].apply(lambda x: any(k in x for k in ['SEGURO', 'METLIFE', 'GNP']))
-    
-    def get_segment(row):
-        if row['isEmpresa']: return 'Empresa'
-        if row['isSeguro']: return 'Seguro'
-        return 'Privado'
-    df['segment'] = df.apply(get_segment, axis=1)
-
-    return df
-
 def aggregate_data(df, year, period_type, period_val, segment_filter):
-    # Filtrar por segmento
     if segment_filter != 'Todos':
         df = df[df['segment'] == segment_filter]
         
-    # Filtrar por año y periodo actual
     df_curr = df[df['year'] == year]
-    df_prev = df[df['year'] == (year - 1)] # Default previous (Año anterior completo)
+    df_prev = df[df['year'] == (year - 1)]
 
     if period_type == 'Mes':
         df_curr = df_curr[df_curr['month'] == period_val]
@@ -131,7 +160,7 @@ def aggregate_data(df, year, period_type, period_val, segment_filter):
 
     def calc_metrics(d):
         if d.empty:
-            return {'rev':0, 'mezcla':0, 'retorno':0, 'occ':0, 'pacientes':0, 'seguros':0, 'empresas':0, 'nuevos_rev':0, 'specialties': {}}
+            return {'rev':0, 'mezcla':0, 'retorno':0, 'occ':0, 'pacientes':0, 'seguros':0, 'empresas':0, 'specialties': {}, 'raw': d}
         
         rev = d['REVENUE'].sum()
         key_rev = d[d['isKey']]['REVENUE'].sum()
@@ -141,14 +170,14 @@ def aggregate_data(df, year, period_type, period_val, segment_filter):
         retorno = (len(docs[docs > 1]) / len(docs) * 100) if len(docs) > 0 else 0
         
         pacientes = d['PATIENT_ID'].nunique()
-        occ = (pacientes / 1100) * 100 # Regla de negocio del código original
+        occ = (pacientes / 1100) * 100
         
         specialties = d.groupby('SPECIALTY')['REVENUE'].sum().sort_values(ascending=False).to_dict()
         
         return {
             'rev': rev, 'mezcla': mezcla, 'retorno': retorno, 'occ': occ, 
             'pacientes': pacientes, 'seguros': d[d['isSeguro']]['PATIENT_ID'].nunique(),
-            'empresas': d[d['isEmpresa']]['REVENUE'].sum(), 'nuevos_rev': 0, # Simplificado
+            'empresas': d[d['isEmpresa']]['REVENUE'].sum(), 
             'specialties': specialties,
             'raw': d
         }
@@ -161,7 +190,6 @@ def aggregate_data(df, year, period_type, period_val, segment_filter):
 st.title("🏥 NewCityHospital BI 2026")
 st.markdown("Estrategia KO26 - Sistema de Análisis Predictivo")
 
-# --- BARRA LATERAL (CONTROLES) ---
 with st.sidebar:
     st.header("Carga de Datos")
     uploaded_file = st.file_uploader("Sube tu archivo Excel", type=["xlsx", "xls", "csv"])
@@ -178,7 +206,6 @@ with st.sidebar:
             
             if period_type == "Mes":
                 meses_str = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
-                # Tomar el mes máximo disponible para ese año por defecto
                 max_month = int(df[df['year'] == year]['month'].max())
                 period_val_str = st.selectbox("Mes", meses_str, index=max_month-1)
                 period_val = meses_str.index(period_val_str) + 1
@@ -186,20 +213,22 @@ with st.sidebar:
                 period_val = st.selectbox("Semestre", [1, 2], format_func=lambda x: f"Semestre {x}")
             else:
                 period_val = None
+        else:
+            st.warning("⚠️ El archivo no tiene el formato esperado o faltan las columnas clave (Fecha e Ingresos) en la hoja de Expedientes.")
+            st.stop()
     else:
-        st.info("👈 Sube un archivo Excel para comenzar el análisis.")
+        st.info("👈 Sube el reporte semanal en Excel para comenzar.")
         st.stop()
 
 # --- CÁLCULO DE MÉTRICAS ---
 curr, prev = aggregate_data(df, year, period_type, period_val, segment)
 
-# Ajuste de metas según periodo
 factor = 12 if period_type == 'Mes' else (2 if period_type == 'Semestre' else 1)
 targets = {
     'rev': TARGETS_ANNUAL['revenue'] / factor,
     'mezcla': TARGETS_ANNUAL['mezcla_pct'],
     'retorno': TARGETS_ANNUAL['retorno_pct'],
-    'occ': 50 if (period_type == 'Mes' and period_val >= 4) else 30 # Regla original
+    'occ': 50 if (period_type == 'Mes' and period_val >= 4) else 30
 }
 
 # --- TARJETAS KPI ---
@@ -210,10 +239,10 @@ def kpi_html(title, val_str, target_str, delta, is_pct=False, reverse_colors=Fal
     icon = "➖"
     if delta > 0.1:
         trend_class = "trend-down" if reverse_colors else "trend-up"
-        icon = "📈" if not reverse_colors else "📉"
+        icon = "📉" if reverse_colors else "📈"
     elif delta < -0.1:
         trend_class = "trend-up" if reverse_colors else "trend-down"
-        icon = "📉" if not reverse_colors else "📈"
+        icon = "📈" if reverse_colors else "📉"
         
     delta_str = f"{abs(delta):.1f}{'pp' if is_pct else '%'}"
     
@@ -251,7 +280,6 @@ chart_col1, chart_col2 = st.columns([2, 1])
 
 with chart_col1:
     st.markdown("#### Tendencia Financiera vs Mezcla")
-    # Generar datos mensuales para la gráfica principal
     df_year = df[(df['year'] == year) & (df['segment'] == segment if segment != 'Todos' else True)]
     monthly_data = df_year.groupby('month').apply(
         lambda x: pd.Series({
@@ -260,7 +288,6 @@ with chart_col1:
         })
     ).reset_index()
     
-    # Rellenar meses faltantes
     all_months = pd.DataFrame({'month': range(1, 13)})
     monthly_data = pd.merge(all_months, monthly_data, on='month', how='left').fillna(0)
     meses_nombres = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
@@ -282,7 +309,6 @@ with chart_col1:
 
 with chart_col2:
     st.markdown("#### Ejes Rectores e Insights")
-    # Smart Insights lógicos
     if curr['rev'] < (targets['rev'] * 0.9):
         st.error(f"**Ingreso Desfasado**: Facturación actual ({format_money(curr['rev'])}) muy por debajo de la meta del periodo.")
     else:
@@ -306,7 +332,7 @@ with col_spec:
     specs_df = pd.DataFrame(list(curr['specialties'].items()), columns=['Especialidad', 'Ingresos']).head(5)
     
     if not specs_df.empty:
-        specs_df = specs_df.sort_values(by='Ingresos', ascending=True) # Ascending for Plotly horizontal bar
+        specs_df = specs_df.sort_values(by='Ingresos', ascending=True)
         fig_spec = px.bar(specs_df, x='Ingresos', y='Especialidad', orientation='h', text_auto='.2s')
         fig_spec.update_traces(marker_color='#3b82f6', textfont_size=12, textangle=0, textposition="outside", cliponaxis=False)
         fig_spec.update_layout(plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(showgrid=False, showticklabels=False), yaxis_title=None, margin=dict(l=0, r=50, t=0, b=0), height=300)
@@ -337,11 +363,11 @@ with col_top:
         </div>
         """, unsafe_allow_html=True)
 
-# --- DRILL DOWN DE MÉDICOS (Alternativa a Modal) ---
+# --- DRILL DOWN DE MÉDICOS ---
 st.markdown("<br>", unsafe_allow_html=True)
 with st.expander("🔍 Ver Detalle de Médicos por Especialidad (Drill-down)", expanded=False):
-    if not df_year.empty:
-        selected_spec = st.selectbox("Selecciona una especialidad para ver sus médicos:", options=curr['specialties'].keys())
+    if not df_year.empty and curr['specialties']:
+        selected_spec = st.selectbox("Selecciona una especialidad para ver sus médicos:", options=list(curr['specialties'].keys()))
         
         doc_df = curr['raw'][curr['raw']['SPECIALTY'] == selected_spec]
         doc_summary = doc_df.groupby('DOCTOR').agg(
@@ -349,7 +375,6 @@ with st.expander("🔍 Ver Detalle de Médicos por Especialidad (Drill-down)", e
             Ingresos_Generados=('REVENUE', 'sum')
         ).reset_index().sort_values(by='Ingresos_Generados', ascending=False)
         
-        # Formato bonito para el dataframe
         st.dataframe(
             doc_summary.style.format({'Ingresos_Generados': '${:,.2f}'}),
             use_container_width=True,
