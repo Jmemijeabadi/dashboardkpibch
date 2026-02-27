@@ -15,7 +15,7 @@ KEYWORDS = {
     'SPECIALTY': ['especialidad grupo', 'especialidad', 'servicio'],
     'DOCTOR': ['medico grupo', 'medico', 'doctor'],
     'PATIENT_ID': ['cuenta', '# cuenta', 'expediente', 'paciente'],
-    'TYPE': ['tipo'] 
+    'TYPE': ['tipo', 'seguro'] 
 }
 
 TARGETS_ANNUAL = {
@@ -85,6 +85,7 @@ def process_data(file):
         for col in df.columns:
             col_lower = str(col).lower()
             
+            # Priorizamos nombres exactos de tu Excel
             if 'ingreso' in col_lower and 'mes' not in col_lower and 'DATE' not in col_map:
                 col_map['DATE'] = col
             elif 'cuenta ventas' in col_lower and 'REVENUE' not in col_map:
@@ -112,14 +113,28 @@ def process_data(file):
         rename_dict = {v: k for k, v in col_map.items()}
         df = df.rename(columns=rename_dict)
         
-        # Limpieza y formateo de datos
+        # ==========================================
+        # LIMPIEZA Y FORMATEO DE DATOS ROBUSTO
+        # ==========================================
         df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
-        df = df.dropna(subset=['DATE'])
-        df['REVENUE'] = pd.to_numeric(df.get('REVENUE', 0).astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
-        df['SPECIALTY'] = df.get('SPECIALTY', 'Otros').fillna('Otros').astype(str).str.upper()
-        df['DOCTOR'] = df.get('DOCTOR', 'Desconocido').fillna('Desconocido').astype(str).str.upper()
-        df['PATIENT_ID'] = df.get('PATIENT_ID', df.index).fillna(df.index).astype(str)
-        df['TYPE'] = df.get('TYPE', 'Privado').fillna('Privado').astype(str).str.upper()
+        df = df.dropna(subset=['DATE']).copy() # El .copy() evita warnings
+        
+        # Asegurar que las columnas existan antes de procesarlas
+        if 'REVENUE' not in df.columns: df['REVENUE'] = 0
+        if 'SPECIALTY' not in df.columns: df['SPECIALTY'] = 'Otros'
+        if 'DOCTOR' not in df.columns: df['DOCTOR'] = 'Desconocido'
+        if 'PATIENT_ID' not in df.columns: df['PATIENT_ID'] = df.index
+        if 'TYPE' not in df.columns: df['TYPE'] = 'Privado'
+
+        # Formateo
+        df['REVENUE'] = pd.to_numeric(df['REVENUE'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
+        df['SPECIALTY'] = df['SPECIALTY'].fillna('Otros').astype(str).str.upper()
+        df['DOCTOR'] = df['DOCTOR'].fillna('Desconocido').astype(str).str.upper()
+        
+        # SOLUCIÓN AL ERROR DEL RANGEINDEX: Convertimos explícitamente el index a Series
+        df['PATIENT_ID'] = df['PATIENT_ID'].fillna(df.index.to_series()).astype(str)
+        
+        df['TYPE'] = df['TYPE'].fillna('Privado').astype(str).str.upper()
 
         # Generar métricas derivadas
         df['year'] = df['DATE'].dt.year
@@ -217,7 +232,7 @@ with st.sidebar:
             st.warning("⚠️ El archivo no tiene el formato esperado o faltan las columnas clave (Fecha e Ingresos) en la hoja de Expedientes.")
             st.stop()
     else:
-        st.info("👈 Sube el reporte semanal en Excel para comenzar.")
+        st.info("👈 Sube el reporte en Excel para comenzar.")
         st.stop()
 
 # --- CÁLCULO DE MÉTRICAS ---
