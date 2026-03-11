@@ -237,7 +237,7 @@ def clean_text(value) -> str:
 
 
 def format_currency(value: float) -> str:
-    return f"${value:,.0f}".replace(",", ",")
+    return f"${value:,.0f}"
 
 
 def format_currency_compact(value: float) -> str:
@@ -250,7 +250,7 @@ def format_currency_compact(value: float) -> str:
 
 
 def format_num(value: float) -> str:
-    return f"{value:,.0f}".replace(",", ",")
+    return f"{value:,.0f}"
 
 
 def format_pct(value: float) -> str:
@@ -588,10 +588,6 @@ def parse_workbook(file_bytes: bytes) -> dict:
 # FILTROS / MÉTRICAS
 # =========================================================
 def get_active_rows(df: pd.DataFrame, active_sheets: List[str], detail_sheets: List[str]) -> pd.DataFrame:
-    """
-    Si active_sheets viene vacío por estado persistido del multiselect,
-    usamos todas las hojas operativas detectadas como fallback.
-    """
     effective_sheets = active_sheets if active_sheets else detail_sheets
     if not effective_sheets:
         return df.iloc[0:0].copy()
@@ -916,7 +912,6 @@ def build_insights(metrics: dict, prev_metrics: Optional[dict], targets: dict, p
     if metrics["insured_patients"] < insured_target * 0.6:
         insights.append(("info", "Bajo flujo de seguro", f"El volumen asegurado actual es {format_num(metrics['insured_patients'])} pacientes."))
 
-    top_specialty = None
     if metrics["specialty_ventas"]:
         top_specialty = sorted(metrics["specialty_ventas"].items(), key=lambda x: x[1], reverse=True)[0]
         insights.append(("success", "Especialidad tractora", f"{top_specialty[0]} lidera el periodo con {format_currency(top_specialty[1])} en Cuenta Ventas."))
@@ -1088,34 +1083,37 @@ if detail_sheets:
 else:
     st.sidebar.error("No se detectaron hojas operativas")
 
-# FIX: sanea el estado persistido del multiselect entre archivos
+# =========================================================
+# HOJAS ACTIVAS - FIX SESSION STATE
+# =========================================================
+file_signature = f"{uploaded_file.name}_{uploaded_file.size}"
+
+if "last_file_signature" not in st.session_state:
+    st.session_state.last_file_signature = file_signature
+
+if st.session_state.last_file_signature != file_signature:
+    st.session_state.last_file_signature = file_signature
+    st.session_state.active_sheets = detail_sheets.copy()
+
 if "active_sheets" not in st.session_state:
     st.session_state.active_sheets = detail_sheets.copy()
-else:
-    st.session_state.active_sheets = [
-        s for s in st.session_state.active_sheets if s in detail_sheets
-    ]
-    if not st.session_state.active_sheets:
-        st.session_state.active_sheets = detail_sheets.copy()
+
+st.session_state.active_sheets = [
+    s for s in st.session_state.active_sheets if s in detail_sheets
+]
+
+if not st.session_state.active_sheets and detail_sheets:
+    st.session_state.active_sheets = detail_sheets.copy()
 
 active_sheets = st.sidebar.multiselect(
     "Hojas operativas activas",
     options=detail_sheets,
-    default=st.session_state.active_sheets,
     key="active_sheets",
 )
 
-# fallback defensivo
-if not active_sheets and detail_sheets:
-    active_sheets = detail_sheets.copy()
-    st.session_state.active_sheets = active_sheets
+effective_active_sheets = active_sheets if active_sheets else detail_sheets.copy()
 
-df_active = get_active_rows(df_all, active_sheets, detail_sheets)
-
-if df_active.empty and detail_sheets:
-    active_sheets = detail_sheets.copy()
-    st.session_state.active_sheets = active_sheets
-    df_active = get_active_rows(df_all, active_sheets, detail_sheets)
+df_active = get_active_rows(df_all, effective_active_sheets, detail_sheets)
 
 if df_active.empty:
     st.error("Se detectaron hojas operativas, pero no se pudo construir un dataset activo. Revisa el parser o la estructura del archivo.")
@@ -1151,7 +1149,7 @@ period_label = describe_period(period_type, year, sub_period)
 badges = [
     f'<span class="badge-pill badge-info">{len(parsed["all_sheets"])} hojas detectadas</span>',
     f'<span class="badge-pill badge-ok">{len(detail_sheets)} operativas</span>',
-    f'<span class="badge-pill badge-info">{len(active_sheets)} activas</span>',
+    f'<span class="badge-pill badge-info">{len(effective_active_sheets)} activas</span>',
 ]
 badges.extend(build_validation_badges(metrics, insurance_summary))
 
@@ -1204,8 +1202,8 @@ with right:
         f"""
         <div class="metric-mini">
             <div class="kpi-label">Hojas activas</div>
-            <div class="kpi-value" style="font-size:1.2rem;">{format_num(len(active_sheets))}</div>
-            <div class="kpi-sub">{html.escape(', '.join(active_sheets[:3]))}{'...' if len(active_sheets) > 3 else ''}</div>
+            <div class="kpi-value" style="font-size:1.2rem;">{format_num(len(effective_active_sheets))}</div>
+            <div class="kpi-sub">{html.escape(', '.join(effective_active_sheets[:3]))}{'...' if len(effective_active_sheets) > 3 else ''}</div>
         </div>
         """,
         unsafe_allow_html=True,
