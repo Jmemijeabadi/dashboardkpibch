@@ -196,12 +196,6 @@ st.markdown(
             font-size: 0.82rem;
             margin-bottom: 0.8rem;
         }
-        .info-card {
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
-            border-radius: 16px;
-            padding: 1rem 1.1rem;
-        }
         .metric-mini {
             background: #ffffff;
             border: 1px solid #e2e8f0;
@@ -500,18 +494,29 @@ def parse_detail_sheet(df_raw: pd.DataFrame, sheet_name: str, header_idx: int) -
     if any(col is None for col in required):
         return pd.DataFrame()
 
-    out = pd.DataFrame()
-    out["source_sheet"] = sheet_name
+    out = pd.DataFrame(index=body.index.copy())
     out["account"] = body[account_col].map(clean_text)
     out["date"] = body[admission_col].map(parse_excel_date)
     out["discharge_date"] = body[discharge_col].map(parse_excel_date) if discharge_col else pd.NaT
     out["doctor"] = body[doctor_col].map(clean_text).replace("", "SIN MÉDICO")
     out["specialty"] = body[specialty_col].map(clean_text).replace("", "SIN ESPECIALIDAD")
-    out["insurance_group"] = body[insurance_group_col].map(clean_text) if insurance_group_col else "SIN SEGURO"
+
+    if insurance_group_col:
+        out["insurance_group"] = body[insurance_group_col].map(clean_text)
+    else:
+        out["insurance_group"] = "SIN SEGURO"
+
     out["type"] = body[type_col].map(clean_text).replace("", "Privado")
     out["account_ventas"] = body[ventas_col].map(parse_number_locale)
     out["account_full"] = body[full_col].map(parse_number_locale) if full_col else out["account_ventas"]
-    out["utility"] = body[utility_col].map(parse_number_locale) if utility_col else None
+
+    if utility_col:
+        out["utility"] = body[utility_col].map(parse_number_locale)
+    else:
+        out["utility"] = pd.NA
+
+    # Importante: asignar source_sheet cuando ya existen filas
+    out["source_sheet"] = sheet_name
 
     out = out[pd.notna(out["date"])].copy()
 
@@ -523,13 +528,11 @@ def parse_detail_sheet(df_raw: pd.DataFrame, sheet_name: str, header_idx: int) -
     out["segment"] = out.apply(lambda r: classify_segment(r["type"], r["insurance_group"]), axis=1)
     out["is_key_specialty"] = out["specialty"].map(is_key_specialty)
 
-    out["length_of_stay"] = (
-        (out["discharge_date"] - out["date"]).dt.days
-        if "discharge_date" in out.columns
-        else None
-    )
-    if "length_of_stay" in out.columns:
+    if "discharge_date" in out.columns:
+        out["length_of_stay"] = (out["discharge_date"] - out["date"]).dt.days
         out["length_of_stay"] = out["length_of_stay"].clip(lower=0)
+    else:
+        out["length_of_stay"] = pd.NA
 
     out["dedupe_key"] = (
         out["account"].astype(str)
@@ -1089,21 +1092,21 @@ else:
 file_signature = f"{uploaded_file.name}_{uploaded_file.size}"
 
 if "last_file_signature" not in st.session_state:
-    st.session_state.last_file_signature = file_signature
+    st.session_state["last_file_signature"] = file_signature
 
-if st.session_state.last_file_signature != file_signature:
-    st.session_state.last_file_signature = file_signature
-    st.session_state.active_sheets = detail_sheets.copy()
+if st.session_state["last_file_signature"] != file_signature:
+    st.session_state["last_file_signature"] = file_signature
+    st.session_state["active_sheets"] = detail_sheets.copy()
 
 if "active_sheets" not in st.session_state:
-    st.session_state.active_sheets = detail_sheets.copy()
+    st.session_state["active_sheets"] = detail_sheets.copy()
 
-st.session_state.active_sheets = [
-    s for s in st.session_state.active_sheets if s in detail_sheets
+st.session_state["active_sheets"] = [
+    s for s in st.session_state["active_sheets"] if s in detail_sheets
 ]
 
-if not st.session_state.active_sheets and detail_sheets:
-    st.session_state.active_sheets = detail_sheets.copy()
+if not st.session_state["active_sheets"] and detail_sheets:
+    st.session_state["active_sheets"] = detail_sheets.copy()
 
 active_sheets = st.sidebar.multiselect(
     "Hojas operativas activas",
@@ -1120,7 +1123,11 @@ if df_active.empty:
     st.stop()
 
 segment = st.sidebar.selectbox("Segmento", SEGMENT_OPTIONS, index=0)
-period_type = st.sidebar.selectbox("Tipo de periodo", PERIOD_OPTIONS, format_func=lambda x: {"week": "Semanal", "month": "Mensual", "year": "Anual"}[x])
+period_type = st.sidebar.selectbox(
+    "Tipo de periodo",
+    PERIOD_OPTIONS,
+    format_func=lambda x: {"week": "Semanal", "month": "Mensual", "year": "Anual"}[x],
+)
 
 available_years = get_available_years(df_active)
 year = st.sidebar.selectbox("Año", available_years)
@@ -1128,18 +1135,30 @@ year = st.sidebar.selectbox("Año", available_years)
 sub_period = None
 if period_type == "month":
     available_months = get_available_months(df_active, year)
-    sub_period = st.sidebar.selectbox("Mes", available_months, format_func=lambda m: pd.Timestamp(year=year, month=int(m), day=1).strftime("%b").capitalize())
+    sub_period = st.sidebar.selectbox(
+        "Mes",
+        available_months,
+        format_func=lambda m: pd.Timestamp(year=year, month=int(m), day=1).strftime("%b").capitalize(),
+    )
 elif period_type == "week":
     available_weeks = get_available_weeks(df_active, year)
     week_map = {k: lbl for k, lbl in available_weeks}
-    sub_period = st.sidebar.selectbox("Semana", list(week_map.keys()), format_func=lambda k: week_map[k])
+    sub_period = st.sidebar.selectbox(
+        "Semana",
+        list(week_map.keys()),
+        format_func=lambda k: week_map[k],
+    )
 
 filtered_df = filter_rows(df_active, segment, period_type, year, sub_period)
 prev_period = get_previous_period(period_type, year, sub_period)
 prev_df = filter_rows(df_active, segment, prev_period["period_type"], prev_period["year"], prev_period["sub_period"])
 
 metrics = aggregate_metrics(filtered_df, period_type, year, sub_period)
-prev_metrics = aggregate_metrics(prev_df, prev_period["period_type"], prev_period["year"], prev_period["sub_period"]) if not prev_df.empty else None
+prev_metrics = (
+    aggregate_metrics(prev_df, prev_period["period_type"], prev_period["year"], prev_period["sub_period"])
+    if not prev_df.empty
+    else None
+)
 
 period_label = describe_period(period_type, year, sub_period)
 
