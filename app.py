@@ -1,7 +1,8 @@
 import io
 import html
+import hashlib
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -27,6 +28,8 @@ DEFAULT_TARGETS = {
     "repeat_doctors_pct": 65.0,
 }
 
+SEGMENTS = ["Todos", "Privado", "Seguro", "Empresa"]
+PERIODS = ["week", "month", "year"]
 KEY_SPECIALTIES = ["ORTOPEDIA", "TRAUMATOLOGIA", "CARDIO", "NEURO", "TORAC", "GENERAL"]
 
 KPI_DEFINITIONS = {
@@ -56,9 +59,6 @@ KPI_DEFINITIONS = {
     },
 }
 
-SEGMENT_OPTIONS = ["Todos", "Privado", "Seguro", "Empresa"]
-PERIOD_OPTIONS = ["week", "month", "year"]
-
 
 # =========================================================
 # STYLE
@@ -70,28 +70,28 @@ st.markdown(
             background: #f8fafc;
         }
         .block-container {
-            padding-top: 1.2rem;
+            padding-top: 1.1rem;
             padding-bottom: 2rem;
         }
         .ga-title {
-            font-size: 1.55rem;
+            font-size: 1.7rem;
             font-weight: 800;
-            letter-spacing: -0.02em;
+            letter-spacing: -0.03em;
             color: #0f172a;
-            margin-bottom: 0.15rem;
+            margin-bottom: 0.1rem;
         }
         .ga-subtitle {
             color: #64748b;
-            font-size: 0.92rem;
+            font-size: 0.95rem;
             margin-bottom: 1rem;
         }
         .kpi-card {
-            background: #ffffff;
+            background: linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
             border: 1px solid #e2e8f0;
-            border-radius: 16px;
+            border-radius: 18px;
             padding: 1rem 1.1rem;
-            box-shadow: 0 10px 24px -20px rgba(15,23,42,0.18);
-            min-height: 138px;
+            box-shadow: 0 14px 28px -24px rgba(15,23,42,0.18);
+            min-height: 146px;
         }
         .kpi-label {
             font-size: 0.72rem;
@@ -102,16 +102,16 @@ st.markdown(
             margin-bottom: 0.35rem;
         }
         .kpi-value {
-            font-size: 1.9rem;
+            font-size: 2rem;
             font-weight: 800;
             color: #0f172a;
             letter-spacing: -0.03em;
-            line-height: 1.05;
+            line-height: 1.02;
         }
         .kpi-sub {
             color: #64748b;
             font-size: 0.8rem;
-            margin-top: 0.3rem;
+            margin-top: 0.28rem;
         }
         .trend {
             display: inline-block;
@@ -165,7 +165,7 @@ st.markdown(
             border: 1px solid #e2e8f0;
             border-radius: 18px;
             padding: 1rem 1.1rem;
-            box-shadow: 0 10px 24px -20px rgba(15,23,42,0.18);
+            box-shadow: 0 14px 28px -24px rgba(15,23,42,0.18);
         }
         .summary-item {
             background: #f8fafc;
@@ -177,12 +177,12 @@ st.markdown(
         .summary-item-title {
             font-weight: 800;
             color: #0f172a;
-            font-size: 0.88rem;
+            font-size: 0.9rem;
             margin-bottom: 0.12rem;
         }
         .summary-item-text {
             color: #475569;
-            font-size: 0.82rem;
+            font-size: 0.83rem;
             line-height: 1.4;
         }
         .panel-title {
@@ -212,7 +212,7 @@ st.markdown(
 # =========================================================
 # HELPERS
 # =========================================================
-def normalize_text(value) -> str:
+def normalize_text(value: Any) -> str:
     return (
         str(value or "")
         .strip()
@@ -222,70 +222,37 @@ def normalize_text(value) -> str:
         .replace("í", "i")
         .replace("ó", "o")
         .replace("ú", "u")
+        .replace("ü", "u")
         .replace("ñ", "n")
     )
 
 
-def clean_text(value) -> str:
+def clean_text(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
 
 
 def format_currency(value: float) -> str:
-    return f"${value:,.0f}"
+    return f"${float(value or 0):,.0f}"
 
 
 def format_currency_compact(value: float) -> str:
-    value = float(value or 0)
-    if abs(value) >= 1_000_000:
-        return f"${value / 1_000_000:.1f}M"
-    if abs(value) >= 1_000:
-        return f"${value / 1_000:.0f}k"
-    return format_currency(value)
+    n = float(value or 0)
+    if abs(n) >= 1_000_000:
+        return f"${n / 1_000_000:.1f}M"
+    if abs(n) >= 1_000:
+        return f"${n / 1_000:.0f}k"
+    return format_currency(n)
 
 
 def format_num(value: float) -> str:
-    return f"{value:,.0f}"
+    return f"{float(value or 0):,.0f}"
 
 
 def format_pct(value: float) -> str:
     return f"{float(value or 0):.1f}%"
 
 
-def safe_percent_delta(curr: float, prev: Optional[float]) -> Optional[float]:
-    if prev is None or pd.isna(prev):
-        return None
-    if prev == 0:
-        return 0 if curr == 0 else None
-    return ((curr - prev) / prev) * 100
-
-
-def safe_point_delta(curr: float, prev: Optional[float]) -> Optional[float]:
-    if prev is None or pd.isna(prev):
-        return None
-    return curr - prev
-
-
-def trend_html(delta: Optional[float], unit: str = "%") -> str:
-    if delta is None or pd.isna(delta):
-        return '<span class="trend trend-neutral">Sin base</span>'
-    if delta > 0.1:
-        return f'<span class="trend trend-up">▲ {abs(delta):.1f}{unit} vs prev.</span>'
-    if delta < -0.1:
-        return f'<span class="trend trend-down">▼ {abs(delta):.1f}{unit} vs prev.</span>'
-    return f'<span class="trend trend-neutral">• {abs(delta):.1f}{unit} vs prev.</span>'
-
-
-def period_target(period_type: str, annual_value: float, monthly_value: float = 0) -> float:
-    if period_type == "year":
-        return annual_value
-    if period_type == "month":
-        return monthly_value or (annual_value / 12)
-    if period_type == "week":
-        return (monthly_value * 12 / 52) if monthly_value else (annual_value / 52)
-    return annual_value
-
-
-def parse_number_locale(value) -> float:
+def parse_number_locale(value: Any) -> float:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return 0.0
     if isinstance(value, (int, float)):
@@ -321,7 +288,7 @@ def parse_number_locale(value) -> float:
         return 0.0
 
 
-def parse_excel_date(value) -> pd.Timestamp:
+def parse_excel_date(value: Any) -> pd.Timestamp:
     if value is None or (isinstance(value, float) and pd.isna(value)) or value == "":
         return pd.NaT
 
@@ -334,21 +301,22 @@ def parse_excel_date(value) -> pd.Timestamp:
     if isinstance(value, (int, float)) and 20_000 < float(value) < 60_000:
         return pd.Timestamp("1899-12-30") + pd.to_timedelta(int(value), unit="D")
 
-    try:
-        d = pd.to_datetime(value, errors="coerce")
-        return d.normalize() if pd.notna(d) else pd.NaT
-    except Exception:
-        return pd.NaT
+    parsed = pd.to_datetime(value, errors="coerce", dayfirst=False)
+    if pd.notna(parsed):
+        return parsed.normalize()
+
+    parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
+    return parsed.normalize() if pd.notna(parsed) else pd.NaT
 
 
-def dedupe_headers(raw_headers: List) -> List[str]:
-    counts = {}
-    output = []
+def dedupe_headers(raw_headers: List[Any]) -> List[str]:
+    counts: Dict[str, int] = {}
+    out: List[str] = []
     for idx, h in enumerate(raw_headers):
         base = normalize_text(h) or f"col_{idx+1}"
         counts[base] = counts.get(base, 0) + 1
-        output.append(base if counts[base] == 1 else f"{base}__{counts[base]}")
-    return output
+        out.append(base if counts[base] == 1 else f"{base}__{counts[base]}")
+    return out
 
 
 def base_header(header: str) -> str:
@@ -356,12 +324,23 @@ def base_header(header: str) -> str:
 
 
 def find_header(headers: List[str], candidates: List[str]) -> Optional[str]:
-    normalized_candidates = [normalize_text(c) for c in candidates]
-    for c in normalized_candidates:
+    norms = [normalize_text(c) for c in candidates]
+    for candidate in norms:
         for h in headers:
-            if base_header(h) == c:
+            if base_header(h) == candidate:
                 return h
     return None
+
+
+def classify_segment(type_value: str, insurance_group: str) -> str:
+    t = clean_text(type_value).upper()
+    s = clean_text(insurance_group).upper()
+
+    if "EMPRESA" in t or "CONVENIO" in t or "B2B" in t:
+        return "Empresa"
+    if "SEGURO" in t or (s and s not in {"SIN SEGURO", "PARTICULAR", "PRIVADO"}):
+        return "Seguro"
+    return "Privado"
 
 
 def is_key_specialty(name: str) -> bool:
@@ -369,55 +348,75 @@ def is_key_specialty(name: str) -> bool:
     return any(k in s for k in KEY_SPECIALTIES)
 
 
-def classify_segment(type_value: str, insurance_group: str) -> str:
-    t = clean_text(type_value).upper()
-    s = clean_text(insurance_group).upper()
-
-    if "EMPRESA" in t or "CONVENIO" in t:
-        return "Empresa"
-    if "SEGURO" in t or (s and s != "SIN SEGURO" and "PARTICULAR" not in s):
-        return "Seguro"
-    return "Privado"
-
-
-def start_of_week(date_value: pd.Timestamp) -> pd.Timestamp:
-    if pd.isna(date_value):
+def start_of_week(dt: pd.Timestamp) -> pd.Timestamp:
+    if pd.isna(dt):
         return pd.NaT
-    return (date_value - pd.to_timedelta(date_value.weekday(), unit="D")).normalize()
+    return (dt - pd.to_timedelta(dt.weekday(), unit="D")).normalize()
 
 
-def describe_period(period_type: str, year: int, sub_period) -> str:
+def describe_period(period_type: str, year: int, sub_period: Optional[Any]) -> str:
     if period_type == "year":
         return f"Año {year}"
     if period_type == "month":
-        month_name = pd.Timestamp(year=year, month=int(sub_period), day=1).strftime("%b").capitalize()
-        return f"{month_name} {year}"
+        return pd.Timestamp(year=year, month=int(sub_period), day=1).strftime("%b %Y").capitalize()
     if period_type == "week":
         dt = pd.to_datetime(sub_period)
         return f"Semana {dt.strftime('%d-%b-%Y')}"
     return "Periodo"
 
 
+def period_target(period_type: str, annual_value: float, monthly_value: float = 0) -> float:
+    if period_type == "year":
+        return annual_value
+    if period_type == "month":
+        return monthly_value or annual_value / 12
+    if period_type == "week":
+        return (monthly_value * 12 / 52) if monthly_value else annual_value / 52
+    return annual_value
+
+
+def safe_percent_delta(curr: float, prev: Optional[float]) -> Optional[float]:
+    if prev is None or pd.isna(prev):
+        return None
+    if prev == 0:
+        return 0 if curr == 0 else None
+    return ((curr - prev) / prev) * 100
+
+
+def safe_point_delta(curr: float, prev: Optional[float]) -> Optional[float]:
+    if prev is None or pd.isna(prev):
+        return None
+    return curr - prev
+
+
+def trend_html(delta: Optional[float], unit: str = "%") -> str:
+    if delta is None or pd.isna(delta):
+        return '<span class="trend trend-neutral">Sin base</span>'
+    if delta > 0.1:
+        return f'<span class="trend trend-up">▲ {abs(delta):.1f}{unit} vs prev.</span>'
+    if delta < -0.1:
+        return f'<span class="trend trend-down">▼ {abs(delta):.1f}{unit} vs prev.</span>'
+    return f'<span class="trend trend-neutral">• {abs(delta):.1f}{unit} vs prev.</span>'
+
+
 # =========================================================
-# PARSEO WORKBOOK
+# PARSER DE WORKBOOK
 # =========================================================
 def detect_detail_sheet(df_raw: pd.DataFrame) -> Optional[int]:
-    for i in range(min(len(df_raw), 12)):
+    required_tokens = {
+        "cuenta",
+        "ingreso",
+        "egreso",
+        "cuenta ventas",
+        "tipo",
+        "especialidad grupo",
+        "seguro grupo",
+        "medico grupo",
+    }
+    for i in range(min(len(df_raw), 15)):
         values = [normalize_text(v) for v in df_raw.iloc[i].tolist()]
-        score = sum(
-            k in values
-            for k in [
-                "cuenta",
-                "ingreso",
-                "egreso",
-                "cuenta ventas",
-                "tipo",
-                "especialidad grupo",
-                "seguro grupo",
-                "medico grupo",
-            ]
-        )
-        if score >= 6:
+        score = sum(token in values for token in required_tokens)
+        if score >= 5:
             return i
     return None
 
@@ -441,21 +440,21 @@ def parse_insurance_summary(df_raw: pd.DataFrame, sheet_name: str) -> Optional[d
     if header_idx is None:
         return None
 
-    raw_headers = dedupe_headers(df_raw.iloc[header_idx].tolist())
+    headers = dedupe_headers(df_raw.iloc[header_idx].tolist())
     body = df_raw.iloc[header_idx + 1 :].copy()
-    body.columns = raw_headers
+    body.columns = headers
 
-    label_col = find_header(raw_headers, ["row labels"])
-    patients_col = find_header(raw_headers, ["pacientes"])
-    full_col = find_header(raw_headers, ["cuenta full"])
-    ventas_col = find_header(raw_headers, ["cuenta ventas"])
+    label_col = find_header(headers, ["row labels"])
+    patients_col = find_header(headers, ["pacientes"])
+    full_col = find_header(headers, ["cuenta full"])
+    ventas_col = find_header(headers, ["cuenta ventas"])
 
-    if not label_col:
+    if label_col is None:
         return None
 
     body = body[body[label_col].astype(str).str.strip() != ""].copy()
 
-    result_rows = []
+    rows: List[dict] = []
     grand_total = None
 
     for _, row in body.iterrows():
@@ -469,9 +468,9 @@ def parse_insurance_summary(df_raw: pd.DataFrame, sheet_name: str) -> Optional[d
         if normalize_text(label) == "grand total":
             grand_total = item
             break
-        result_rows.append(item)
+        rows.append(item)
 
-    return {"sheet_name": sheet_name, "items": result_rows, "grand_total": grand_total}
+    return {"sheet_name": sheet_name, "items": rows, "grand_total": grand_total}
 
 
 def parse_detail_sheet(df_raw: pd.DataFrame, sheet_name: str, header_idx: int) -> pd.DataFrame:
@@ -500,26 +499,14 @@ def parse_detail_sheet(df_raw: pd.DataFrame, sheet_name: str, header_idx: int) -
     out["discharge_date"] = body[discharge_col].map(parse_excel_date) if discharge_col else pd.NaT
     out["doctor"] = body[doctor_col].map(clean_text).replace("", "SIN MÉDICO")
     out["specialty"] = body[specialty_col].map(clean_text).replace("", "SIN ESPECIALIDAD")
-
-    if insurance_group_col:
-        out["insurance_group"] = body[insurance_group_col].map(clean_text)
-    else:
-        out["insurance_group"] = "SIN SEGURO"
-
+    out["insurance_group"] = body[insurance_group_col].map(clean_text) if insurance_group_col else "SIN SEGURO"
     out["type"] = body[type_col].map(clean_text).replace("", "Privado")
     out["account_ventas"] = body[ventas_col].map(parse_number_locale)
     out["account_full"] = body[full_col].map(parse_number_locale) if full_col else out["account_ventas"]
-
-    if utility_col:
-        out["utility"] = body[utility_col].map(parse_number_locale)
-    else:
-        out["utility"] = pd.NA
-
-    # Importante: asignar source_sheet cuando ya existen filas
+    out["utility"] = body[utility_col].map(parse_number_locale) if utility_col else pd.NA
     out["source_sheet"] = sheet_name
 
     out = out[pd.notna(out["date"])].copy()
-
     out["year"] = out["date"].dt.year
     out["month"] = out["date"].dt.month
     out["day"] = out["date"].dt.day
@@ -528,11 +515,11 @@ def parse_detail_sheet(df_raw: pd.DataFrame, sheet_name: str, header_idx: int) -
     out["segment"] = out.apply(lambda r: classify_segment(r["type"], r["insurance_group"]), axis=1)
     out["is_key_specialty"] = out["specialty"].map(is_key_specialty)
 
-    if "discharge_date" in out.columns:
-        out["length_of_stay"] = (out["discharge_date"] - out["date"]).dt.days
+    out["length_of_stay"] = (
+        (out["discharge_date"] - out["date"]).dt.days if "discharge_date" in out.columns else pd.NA
+    )
+    if "length_of_stay" in out.columns:
         out["length_of_stay"] = out["length_of_stay"].clip(lower=0)
-    else:
-        out["length_of_stay"] = pd.NA
 
     out["dedupe_key"] = (
         out["account"].astype(str)
@@ -556,14 +543,15 @@ def parse_detail_sheet(df_raw: pd.DataFrame, sheet_name: str, header_idx: int) -
 def parse_workbook(file_bytes: bytes) -> dict:
     excel = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None, header=None, engine="openpyxl")
 
-    detail_frames = []
-    detail_sheets = []
+    detail_frames: List[pd.DataFrame] = []
+    detail_sheets: List[str] = []
     insurance_summary = None
 
     for sheet_name, df_raw in excel.items():
-        detail_idx = detect_detail_sheet(df_raw)
-        if detail_idx is not None:
-            parsed = parse_detail_sheet(df_raw, sheet_name, detail_idx)
+        header_idx = detect_detail_sheet(df_raw)
+
+        if header_idx is not None:
+            parsed = parse_detail_sheet(df_raw, sheet_name, header_idx)
             if not parsed.empty:
                 detail_frames.append(parsed)
                 detail_sheets.append(sheet_name)
@@ -602,31 +590,24 @@ def get_available_years(df: pd.DataFrame) -> List[int]:
 
 
 def get_available_months(df: pd.DataFrame, year: int) -> List[int]:
-    subset = df[df["year"] == year]
-    return sorted(subset["month"].dropna().astype(int).unique().tolist())
+    return sorted(df.loc[df["year"] == year, "month"].dropna().astype(int).unique().tolist())
 
 
 def get_available_weeks(df: pd.DataFrame, year: int) -> List[Tuple[str, str]]:
-    subset = df[df["year"] == year].copy()
-    if subset.empty:
-        return []
-
-    weeks = (
-        subset[["week_key", "week_start"]]
+    subset = (
+        df[df["year"] == year][["week_key", "week_start"]]
         .drop_duplicates()
         .sort_values("week_start")
-        .reset_index(drop=True)
     )
-    out = []
-    for _, row in weeks.iterrows():
+    rows: List[Tuple[str, str]] = []
+    for _, row in subset.iterrows():
         start = row["week_start"]
         end = start + pd.Timedelta(days=6)
-        label = f"{start.strftime('%d-%b-%Y')} - {end.strftime('%d-%b-%Y')}"
-        out.append((row["week_key"], label))
-    return out
+        rows.append((row["week_key"], f"{start.strftime('%d-%b-%Y')} - {end.strftime('%d-%b-%Y')}"))
+    return rows
 
 
-def filter_rows(df: pd.DataFrame, segment: str, period_type: str, year: int, sub_period) -> pd.DataFrame:
+def filter_rows(df: pd.DataFrame, segment: str, period_type: str, year: int, sub_period: Optional[Any]) -> pd.DataFrame:
     result = df.copy()
 
     if segment != "Todos":
@@ -642,7 +623,7 @@ def filter_rows(df: pd.DataFrame, segment: str, period_type: str, year: int, sub
     return result.copy()
 
 
-def get_previous_period(period_type: str, year: int, sub_period):
+def get_previous_period(period_type: str, year: int, sub_period: Optional[Any]) -> Dict[str, Any]:
     if period_type == "year":
         return {"period_type": "year", "year": year - 1, "sub_period": None}
 
@@ -652,16 +633,11 @@ def get_previous_period(period_type: str, year: int, sub_period):
             return {"period_type": "month", "year": year - 1, "sub_period": 12}
         return {"period_type": "month", "year": year, "sub_period": month - 1}
 
-    week_start = pd.to_datetime(sub_period)
-    prev_week = week_start - pd.Timedelta(days=7)
-    return {
-        "period_type": "week",
-        "year": prev_week.year,
-        "sub_period": prev_week.strftime("%Y-%m-%d"),
-    }
+    dt = pd.to_datetime(sub_period) - pd.Timedelta(days=7)
+    return {"period_type": "week", "year": dt.year, "sub_period": dt.strftime("%Y-%m-%d")}
 
 
-def aggregate_metrics(df: pd.DataFrame, period_type: str, year: int, sub_period) -> dict:
+def aggregate_metrics(df: pd.DataFrame, period_type: str, year: int, sub_period: Optional[Any]) -> Dict[str, Any]:
     if df.empty:
         return {
             "account_ventas": 0.0,
@@ -677,11 +653,12 @@ def aggregate_metrics(df: pd.DataFrame, period_type: str, year: int, sub_period)
             "repeat_doctors_pct": 0.0,
             "avg_stay": 0.0,
             "specialty_ventas": {},
+            "segment_ventas": {},
             "doctor_stats": pd.DataFrame(columns=["doctor", "patients", "account_full", "account_ventas"]),
         }
 
-    patients = df["account"].nunique()
-    insured_patients = df[df["segment"] == "Seguro"]["account"].nunique()
+    patients = int(df["account"].nunique())
+    insured_patients = int(df.loc[df["segment"] == "Seguro", "account"].nunique())
 
     doctor_stats = (
         df.groupby("doctor", dropna=False)
@@ -691,10 +668,38 @@ def aggregate_metrics(df: pd.DataFrame, period_type: str, year: int, sub_period)
             account_ventas=("account_ventas", "sum"),
         )
         .reset_index()
+        .sort_values("account_ventas", ascending=False)
+        .reset_index(drop=True)
     )
 
-    repeat_doctors = int((doctor_stats["patients"] > 1).sum())
     total_doctors = int(len(doctor_stats))
+    repeat_doctors = int((doctor_stats["patients"] > 1).sum())
+
+    account_ventas = float(df["account_ventas"].sum())
+    account_full = float(df["account_full"].sum())
+    key_revenue = float(df.loc[df["is_key_specialty"], "account_ventas"].sum())
+    key_mix_pct = (key_revenue / account_ventas * 100) if account_ventas > 0 else 0.0
+
+    avg_stay = (
+        float(df["length_of_stay"].dropna().mean())
+        if "length_of_stay" in df.columns and df["length_of_stay"].notna().any()
+        else 0.0
+    )
+
+    projected_ventas = account_ventas
+    if period_type == "month":
+        max_day = int(df["day"].max())
+        days_in_month = pd.Timestamp(year=year, month=int(sub_period), day=1).days_in_month
+        if 0 < max_day < days_in_month:
+            projected_ventas = (account_ventas / max_day) * days_in_month
+    elif period_type == "week":
+        observed_days = df["date"].dt.normalize().nunique()
+        if 0 < observed_days < 7:
+            projected_ventas = (account_ventas / observed_days) * 7
+    elif period_type == "year":
+        max_month = int(df["month"].max())
+        if 0 < max_month < 12:
+            projected_ventas = (account_ventas / max_month) * 12
 
     specialty_ventas = (
         df.groupby("specialty", dropna=False)["account_ventas"]
@@ -702,35 +707,19 @@ def aggregate_metrics(df: pd.DataFrame, period_type: str, year: int, sub_period)
         .sort_values(ascending=False)
         .to_dict()
     )
-
-    account_ventas = float(df["account_ventas"].sum())
-    account_full = float(df["account_full"].sum())
-    key_revenue = float(df.loc[df["is_key_specialty"], "account_ventas"].sum())
-    key_mix_pct = (key_revenue / account_ventas * 100) if account_ventas > 0 else 0.0
-
-    avg_stay = float(df["length_of_stay"].dropna().mean()) if "length_of_stay" in df.columns and df["length_of_stay"].notna().any() else 0.0
-
-    projected_ventas = account_ventas
-    if period_type == "month":
-        max_day = int(df["day"].max())
-        days_in_month = pd.Timestamp(year=year, month=int(sub_period), day=1).days_in_month
-        if max_day > 0 and max_day < days_in_month:
-            projected_ventas = (account_ventas / max_day) * days_in_month
-    elif period_type == "week":
-        observed_days = df["date"].dt.normalize().nunique()
-        if observed_days > 0 and observed_days < 7:
-            projected_ventas = (account_ventas / observed_days) * 7
-    elif period_type == "year":
-        max_month = int(df["month"].max())
-        if max_month > 0 and max_month < 12:
-            projected_ventas = (account_ventas / max_month) * 12
+    segment_ventas = (
+        df.groupby("segment", dropna=False)["account_ventas"]
+        .sum()
+        .sort_values(ascending=False)
+        .to_dict()
+    )
 
     return {
         "account_ventas": account_ventas,
         "account_full": account_full,
         "projected_ventas": projected_ventas,
-        "patients": int(patients),
-        "insured_patients": int(insured_patients),
+        "patients": patients,
+        "insured_patients": insured_patients,
         "avg_ticket_ventas": account_ventas / patients if patients else 0.0,
         "avg_ticket_full": account_full / patients if patients else 0.0,
         "key_mix_pct": key_mix_pct,
@@ -739,27 +728,28 @@ def aggregate_metrics(df: pd.DataFrame, period_type: str, year: int, sub_period)
         "repeat_doctors_pct": (repeat_doctors / total_doctors * 100) if total_doctors else 0.0,
         "avg_stay": avg_stay,
         "specialty_ventas": specialty_ventas,
-        "doctor_stats": doctor_stats.sort_values("account_ventas", ascending=False).reset_index(drop=True),
+        "segment_ventas": segment_ventas,
+        "doctor_stats": doctor_stats,
     }
 
 
 # =========================================================
 # CHARTS
 # =========================================================
-def build_main_chart(df_active: pd.DataFrame, segment: str, period_type: str, year: int, sub_period) -> go.Figure:
-    labels = []
-    revenue_values = []
-    mix_values = []
+def build_main_chart(df_active: pd.DataFrame, segment: str, period_type: str, year: int, sub_period: Optional[Any]) -> go.Figure:
+    labels: List[str] = []
+    revs: List[float] = []
+    mixes: List[float] = []
 
     if period_type == "year":
         title = f"Tendencia mensual {year}"
         subtitle = "Cuenta Ventas vs Mix por mes"
         for month in range(1, 13):
             subset = filter_rows(df_active, segment, "month", year, month)
-            metrics = aggregate_metrics(subset, "month", year, month)
+            agg = aggregate_metrics(subset, "month", year, month)
             labels.append(pd.Timestamp(year=year, month=month, day=1).strftime("%b"))
-            revenue_values.append(metrics["account_ventas"])
-            mix_values.append(metrics["key_mix_pct"])
+            revs.append(agg["account_ventas"])
+            mixes.append(agg["key_mix_pct"])
 
     elif period_type == "month":
         title = f"Tendencia diaria · {describe_period('month', year, sub_period)}"
@@ -772,32 +762,31 @@ def build_main_chart(df_active: pd.DataFrame, segment: str, period_type: str, ye
                 & (df_active["day"] == day)
                 & ((df_active["segment"] == segment) if segment != "Todos" else True)
             ]
-            metrics = aggregate_metrics(subset, "month", year, sub_period)
+            agg = aggregate_metrics(subset, "month", year, sub_period)
             labels.append(str(day))
-            revenue_values.append(metrics["account_ventas"])
-            mix_values.append(metrics["key_mix_pct"])
+            revs.append(agg["account_ventas"])
+            mixes.append(agg["key_mix_pct"])
 
     else:
         title = f"Tendencia diaria · {describe_period('week', year, sub_period)}"
         subtitle = "Cuenta Ventas vs Mix por día"
         subset = filter_rows(df_active, segment, "week", year, sub_period)
-        grouped = subset.groupby(subset["date"].dt.normalize())
-        for date_key, day_df in grouped:
-            metrics = aggregate_metrics(day_df, "week", year, sub_period)
+        for date_key, day_df in subset.groupby(subset["date"].dt.normalize()):
+            agg = aggregate_metrics(day_df, "week", year, sub_period)
             labels.append(pd.to_datetime(date_key).strftime("%d-%b"))
-            revenue_values.append(metrics["account_ventas"])
-            mix_values.append(metrics["key_mix_pct"])
+            revs.append(agg["account_ventas"])
+            mixes.append(agg["key_mix_pct"])
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(
-        go.Bar(name="Cuenta Ventas", x=labels, y=revenue_values, marker_color="#0f172a"),
+        go.Bar(name="Cuenta Ventas", x=labels, y=revs, marker_color="#0f172a"),
         secondary_y=False,
     )
     fig.add_trace(
         go.Scatter(
             name="Mix Clave %",
             x=labels,
-            y=mix_values,
+            y=mixes,
             mode="lines+markers",
             line=dict(color="#10b981", width=2),
             marker=dict(size=6),
@@ -808,8 +797,8 @@ def build_main_chart(df_active: pd.DataFrame, segment: str, period_type: str, ye
     fig.update_layout(
         title=f"{title}<br><sup>{subtitle}</sup>",
         template="plotly_white",
-        height=370,
-        margin=dict(l=10, r=10, t=70, b=20),
+        height=390,
+        margin=dict(l=10, r=10, t=72, b=20),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
     fig.update_yaxes(title_text="Cuenta Ventas", secondary_y=False)
@@ -817,30 +806,29 @@ def build_main_chart(df_active: pd.DataFrame, segment: str, period_type: str, ye
     return fig
 
 
-def build_specialty_chart(curr_metrics: dict, prev_metrics: Optional[dict]) -> go.Figure:
+def build_specialty_chart(curr_metrics: Dict[str, Any], prev_metrics: Optional[Dict[str, Any]]) -> go.Figure:
     items = sorted(curr_metrics["specialty_ventas"].items(), key=lambda x: x[1], reverse=True)[:5]
 
-    labels = []
-    values = []
-    colors = []
+    labels: List[str] = []
+    values: List[float] = []
+    colors: List[str] = []
 
     for name, value in items:
-        prev_value = 0 if not prev_metrics else prev_metrics["specialty_ventas"].get(name, 0)
+        prev_val = 0 if not prev_metrics else prev_metrics["specialty_ventas"].get(name, 0)
         labels.append(name)
         values.append(value)
-        colors.append("#10b981" if value >= prev_value else "#ef4444")
+        colors.append("#10b981" if value >= prev_val else "#ef4444")
 
-    fig = go.Figure(
-        data=[
-            go.Bar(
-                x=values,
-                y=labels,
-                orientation="h",
-                marker_color=colors,
-                text=[format_currency(v) for v in values],
-                textposition="outside",
-            )
-        ]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=values,
+            y=labels,
+            orientation="h",
+            marker_color=colors,
+            text=[format_currency(v) for v in values],
+            textposition="outside",
+        )
     )
     fig.update_layout(
         title="Top 5 especialidades · Cuenta Ventas",
@@ -852,53 +840,76 @@ def build_specialty_chart(curr_metrics: dict, prev_metrics: Optional[dict]) -> g
     return fig
 
 
+def build_segment_donut(metrics: Dict[str, Any]) -> go.Figure:
+    labels = list(metrics["segment_ventas"].keys())
+    values = list(metrics["segment_ventas"].values())
+    if not values:
+        labels, values = ["Sin datos"], [1]
+
+    fig = go.Figure(
+        data=[
+            go.Pie(
+                labels=labels,
+                values=values,
+                hole=0.58,
+                sort=False,
+                marker=dict(colors=["#0f172a", "#3b82f6", "#10b981", "#f59e0b"]),
+                textinfo="label+percent",
+            )
+        ]
+    )
+    fig.update_layout(
+        title="Composición por segmento",
+        template="plotly_white",
+        height=340,
+        margin=dict(l=10, r=10, t=55, b=10),
+        showlegend=False,
+    )
+    return fig
+
+
 # =========================================================
 # INSIGHTS / BOARD
 # =========================================================
-def build_board_summary(metrics: dict, prev_metrics: Optional[dict], targets: dict, period_type: str) -> List[Tuple[str, str]]:
+def build_board_summary(metrics: Dict[str, Any], prev_metrics: Optional[Dict[str, Any]], targets: Dict[str, float], period_type: str) -> List[Tuple[str, str]]:
     revenue_target = period_target(period_type, targets["annual_revenue"], targets["annual_revenue"] / 12)
-
-    bullets = []
+    bullets: List[Tuple[str, str]] = []
 
     if metrics["account_ventas"] >= revenue_target:
         bullets.append((
             "Ingreso alineado o superior a meta",
-            f"El periodo registra {format_currency(metrics['account_ventas'])} frente a una meta de {format_currency(revenue_target)}."
+            f"El periodo registra {format_currency(metrics['account_ventas'])} frente a una meta de {format_currency(revenue_target)}.",
         ))
     elif period_type != "year" and metrics["projected_ventas"] >= revenue_target:
         bullets.append((
             "Meta recuperable por proyección",
-            f"El ingreso actual es {format_currency(metrics['account_ventas'])}, pero la proyección de cierre alcanza {format_currency(metrics['projected_ventas'])}."
+            f"El ingreso actual es {format_currency(metrics['account_ventas'])}, pero la proyección de cierre alcanza {format_currency(metrics['projected_ventas'])}.",
         ))
     else:
         bullets.append((
             "Brecha económica en el corte",
-            f"Los ingresos actuales son {format_currency(metrics['account_ventas'])} contra una meta de {format_currency(revenue_target)}."
+            f"Los ingresos actuales son {format_currency(metrics['account_ventas'])} contra una meta de {format_currency(revenue_target)}.",
         ))
 
     bullets.append((
         "Composición estratégica",
-        f"El mix de especialidades clave se ubica en {format_pct(metrics['key_mix_pct'])}."
+        f"El mix de especialidades clave se ubica en {format_pct(metrics['key_mix_pct'])}.",
     ))
-
     bullets.append((
         "Volumen observable",
-        f"{format_num(metrics['patients'])} pacientes únicos en el periodo; {format_num(metrics['insured_patients'])} pertenecen al segmento seguro."
+        f"{format_num(metrics['patients'])} pacientes únicos en el periodo; {format_num(metrics['insured_patients'])} pertenecen al segmento seguro.",
     ))
-
     bullets.append((
         "Recurrencia médica",
-        f"{format_pct(metrics['repeat_doctors_pct'])} de los médicos activos atendió más de un paciente único."
+        f"{format_pct(metrics['repeat_doctors_pct'])} de los médicos activos atendió más de un paciente único.",
     ))
-
     return bullets[:4]
 
 
-def build_insights(metrics: dict, prev_metrics: Optional[dict], targets: dict, period_type: str) -> List[Tuple[str, str, str]]:
+def build_insights(metrics: Dict[str, Any], prev_metrics: Optional[Dict[str, Any]], targets: Dict[str, float], period_type: str) -> List[Tuple[str, str, str]]:
     revenue_target = period_target(period_type, targets["annual_revenue"], targets["annual_revenue"] / 12)
     insured_target = period_target(period_type, 0, targets["monthly_insured"])
-
-    insights = []
+    insights: List[Tuple[str, str, str]] = []
 
     if period_type != "year" and metrics["projected_ventas"] > metrics["account_ventas"] and metrics["projected_ventas"] < revenue_target * 0.95:
         insights.append(("error", "Proyección por debajo de meta", f"El periodo podría cerrar en {format_currency(metrics['projected_ventas'])} si el ritmo actual se mantiene."))
@@ -922,7 +933,7 @@ def build_insights(metrics: dict, prev_metrics: Optional[dict], targets: dict, p
     return insights
 
 
-def build_detail_table(metrics: dict, targets: dict, period_type: str) -> pd.DataFrame:
+def build_detail_table(metrics: Dict[str, Any], targets: Dict[str, float], period_type: str) -> pd.DataFrame:
     revenue_target = period_target(period_type, targets["annual_revenue"], targets["annual_revenue"] / 12)
     patient_target = period_target(period_type, 0, targets["monthly_patients"])
     insured_target = period_target(period_type, 0, targets["monthly_insured"])
@@ -937,39 +948,39 @@ def build_detail_table(metrics: dict, targets: dict, period_type: str) -> pd.Dat
         ["Médicos con >1 paciente", metrics["repeat_doctors_pct"], targets["repeat_doctors_pct"], "pct", "Dar seguimiento a médicos de una sola cuenta y priorizar reactivación."],
     ]
 
-    formatted = []
+    formatted: List[Dict[str, str]] = []
     for label, value, target, fmt, action in rows:
         ok = value >= target
+
         if fmt == "money":
-            gap = value - target
+            gap_txt = format_currency(value - target)
             value_txt = format_currency(value)
             target_txt = format_currency(target)
-            gap_txt = format_currency(gap)
         elif fmt == "pct":
-            gap = value - target
+            gap_txt = f"{value - target:.1f}pp"
             value_txt = format_pct(value)
             target_txt = format_pct(target)
-            gap_txt = f"{gap:.1f}pp"
         else:
-            gap = value - target
+            gap_txt = format_num(value - target)
             value_txt = format_num(value)
             target_txt = format_num(target)
-            gap_txt = format_num(gap)
 
-        formatted.append({
-            "Métrica": label,
-            "Actual": value_txt,
-            "Meta": target_txt,
-            "Brecha": gap_txt,
-            "Estado": "Cumple" if ok else "Brecha",
-            "Acción sugerida": "Mantener disciplina operativa." if ok else action,
-        })
+        formatted.append(
+            {
+                "Métrica": label,
+                "Actual": value_txt,
+                "Meta": target_txt,
+                "Brecha": gap_txt,
+                "Estado": "Cumple" if ok else "Brecha",
+                "Acción sugerida": "Mantener disciplina operativa." if ok else action,
+            }
+        )
 
     return pd.DataFrame(formatted)
 
 
-def build_validation_badges(metrics: dict, insurance_summary: Optional[dict]) -> List[str]:
-    badges = []
+def build_validation_badges(metrics: Dict[str, Any], insurance_summary: Optional[dict]) -> List[str]:
+    badges: List[str] = []
 
     if insurance_summary and insurance_summary.get("grand_total"):
         grand = insurance_summary["grand_total"]
@@ -994,13 +1005,7 @@ def build_validation_badges(metrics: dict, insurance_summary: Optional[dict]) ->
 # =========================================================
 # EXPORTS
 # =========================================================
-def build_summary_text(
-    workbook_name: str,
-    period_label: str,
-    segment: str,
-    metrics: dict,
-    detail_df: pd.DataFrame,
-) -> str:
+def build_summary_text(workbook_name: str, period_label: str, segment: str, metrics: Dict[str, Any], detail_df: pd.DataFrame) -> str:
     lines = [
         "NEWCITY HOSPITAL | RESUMEN EJECUTIVO KO26",
         f"Workbook: {workbook_name}",
@@ -1057,15 +1062,22 @@ targets = {
 
 
 # =========================================================
-# MAIN
+# EMPTY STATE
 # =========================================================
 st.markdown('<div class="ga-title">NewCity Hospital BI 2026</div>', unsafe_allow_html=True)
-st.markdown('<div class="ga-subtitle">Dashboard ejecutivo KO26 · consolidación de múltiples hojas · lectura fácil para dirección</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="ga-subtitle">Dashboard ejecutivo KO26 · Business Intelligence para ingresos, mezcla, recurrencia médica y volumen hospitalario</div>',
+    unsafe_allow_html=True,
+)
 
 if not uploaded_file:
     st.info("Carga un workbook para activar el dashboard.")
     st.stop()
 
+
+# =========================================================
+# PARSE FILE
+# =========================================================
 try:
     parsed = parse_workbook(uploaded_file.getvalue())
 except Exception as e:
@@ -1086,35 +1098,23 @@ if detail_sheets:
 else:
     st.sidebar.error("No se detectaron hojas operativas")
 
+
 # =========================================================
-# HOJAS ACTIVAS - FIX SESSION STATE
+# ACTIVE SHEETS
 # =========================================================
-file_signature = f"{uploaded_file.name}_{uploaded_file.size}"
+file_signature = hashlib.md5(f"{uploaded_file.name}_{uploaded_file.size}".encode()).hexdigest()
+sheet_widget_key = f"active_sheets_widget_{file_signature}"
 
-if "last_file_signature" not in st.session_state:
-    st.session_state["last_file_signature"] = file_signature
-
-if st.session_state["last_file_signature"] != file_signature:
-    st.session_state["last_file_signature"] = file_signature
-    st.session_state["active_sheets"] = detail_sheets.copy()
-
-if "active_sheets" not in st.session_state:
-    st.session_state["active_sheets"] = detail_sheets.copy()
-
-st.session_state["active_sheets"] = [
-    s for s in st.session_state["active_sheets"] if s in detail_sheets
-]
-
-if not st.session_state["active_sheets"] and detail_sheets:
-    st.session_state["active_sheets"] = detail_sheets.copy()
-
-active_sheets = st.sidebar.multiselect(
+default_active_sheets = detail_sheets.copy()
+effective_active_sheets = st.sidebar.multiselect(
     "Hojas operativas activas",
     options=detail_sheets,
-    key="active_sheets",
+    default=default_active_sheets,
+    key=sheet_widget_key,
 )
 
-effective_active_sheets = active_sheets if active_sheets else detail_sheets.copy()
+if not effective_active_sheets:
+    effective_active_sheets = detail_sheets.copy()
 
 df_active = get_active_rows(df_all, effective_active_sheets, detail_sheets)
 
@@ -1122,10 +1122,14 @@ if df_active.empty:
     st.error("Se detectaron hojas operativas, pero no se pudo construir un dataset activo. Revisa el parser o la estructura del archivo.")
     st.stop()
 
-segment = st.sidebar.selectbox("Segmento", SEGMENT_OPTIONS, index=0)
+
+# =========================================================
+# FILTERS
+# =========================================================
+segment = st.sidebar.selectbox("Segmento", SEGMENTS, index=0)
 period_type = st.sidebar.selectbox(
     "Tipo de periodo",
-    PERIOD_OPTIONS,
+    PERIODS,
     format_func=lambda x: {"week": "Semanal", "month": "Mensual", "year": "Anual"}[x],
 )
 
@@ -1149,6 +1153,7 @@ elif period_type == "week":
         format_func=lambda k: week_map[k],
     )
 
+
 filtered_df = filter_rows(df_active, segment, period_type, year, sub_period)
 prev_period = get_previous_period(period_type, year, sub_period)
 prev_df = filter_rows(df_active, segment, prev_period["period_type"], prev_period["year"], prev_period["sub_period"])
@@ -1162,8 +1167,9 @@ prev_metrics = (
 
 period_label = describe_period(period_type, year, sub_period)
 
+
 # =========================================================
-# HEADER META
+# HEADER SUMMARY
 # =========================================================
 badges = [
     f'<span class="badge-pill badge-info">{len(parsed["all_sheets"])} hojas detectadas</span>',
@@ -1185,247 +1191,255 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# =========================================================
-# BOARD SUMMARY
-# =========================================================
-board_bullets = build_board_summary(metrics, prev_metrics, targets, period_type)
-left, right = st.columns([2, 1], gap="large")
-
-with left:
-    st.markdown('<div class="panel-title">Resumen ejecutivo board-ready</div>', unsafe_allow_html=True)
-    for title, text in board_bullets:
-        st.markdown(
-            f"""
-            <div class="summary-item">
-                <div class="summary-item-title">{html.escape(title)}</div>
-                <div class="summary-item-text">{html.escape(text)}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-with right:
-    st.markdown('<div class="panel-title">Contexto del filtro</div>', unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class="metric-mini">
-            <div class="kpi-label">Periodo</div>
-            <div class="kpi-value" style="font-size:1.2rem;">{html.escape(period_label)}</div>
-            <div class="kpi-sub">Segmento: {html.escape(segment)}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class="metric-mini">
-            <div class="kpi-label">Hojas activas</div>
-            <div class="kpi-value" style="font-size:1.2rem;">{format_num(len(effective_active_sheets))}</div>
-            <div class="kpi-sub">{html.escape(', '.join(effective_active_sheets[:3]))}{'...' if len(effective_active_sheets) > 3 else ''}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 # =========================================================
-# KPI ROW
+# TABS
 # =========================================================
-revenue_target = period_target(period_type, targets["annual_revenue"], targets["annual_revenue"] / 12)
-patients_target = period_target(period_type, 0, targets["monthly_patients"])
+tab_exec, tab_med, tab_data = st.tabs(
+    ["Resumen Ejecutivo", "Especialidades y Médicos", "Calidad de Datos y Exportación"]
+)
 
-revenue_delta = safe_percent_delta(metrics["account_ventas"], prev_metrics["account_ventas"]) if prev_metrics else None
-mix_delta = safe_point_delta(metrics["key_mix_pct"], prev_metrics["key_mix_pct"]) if prev_metrics else None
-repeat_delta = safe_point_delta(metrics["repeat_doctors_pct"], prev_metrics["repeat_doctors_pct"]) if prev_metrics else None
-patients_delta = safe_percent_delta(metrics["patients"], prev_metrics["patients"]) if prev_metrics else None
+with tab_exec:
+    board_bullets = build_board_summary(metrics, prev_metrics, targets, period_type)
+    left, right = st.columns([2, 1], gap="large")
 
-col1, col2, col3, col4 = st.columns(4, gap="medium")
-
-with col1:
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-label">Ingresos del periodo</div>
-            <div class="kpi-value">{format_currency_compact(metrics["account_ventas"])}</div>
-            <div class="kpi-sub">Meta: {format_currency_compact(revenue_target)}</div>
-            <div class="kpi-sub">Proyección: {format_currency_compact(metrics["projected_ventas"])}</div>
-            {trend_html(revenue_delta, "%")}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-with col2:
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-label">Mix esp. clave</div>
-            <div class="kpi-value" style="color:#10b981;">{format_pct(metrics["key_mix_pct"])}</div>
-            <div class="kpi-sub">Meta: {format_pct(targets["mix_pct"])}</div>
-            {trend_html(mix_delta, "pp")}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-with col3:
-    color = "#10b981" if metrics["repeat_doctors_pct"] >= targets["repeat_doctors_pct"] else "#ef4444"
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-label">Médicos &gt; 1 paciente</div>
-            <div class="kpi-value" style="color:{color};">{format_pct(metrics["repeat_doctors_pct"])}</div>
-            <div class="kpi-sub">Meta: {format_pct(targets["repeat_doctors_pct"])}</div>
-            {trend_html(repeat_delta, "pp")}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-with col4:
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-label">Pacientes únicos</div>
-            <div class="kpi-value">{format_num(metrics["patients"])}</div>
-            <div class="kpi-sub">Meta: {format_num(patients_target)} pacientes</div>
-            <div class="kpi-sub">Ticket: {format_currency_compact(metrics["avg_ticket_ventas"])}</div>
-            {trend_html(patients_delta, "%")}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# =========================================================
-# CHARTS
-# =========================================================
-left_chart, right_chart = st.columns([2, 1], gap="large")
-
-with left_chart:
-    fig_main = build_main_chart(df_active, segment, period_type, year, sub_period)
-    st.plotly_chart(fig_main, use_container_width=True)
-
-with right_chart:
-    st.markdown('<div class="panel-title">Insights operativos</div>', unsafe_allow_html=True)
-    insights = build_insights(metrics, prev_metrics, targets, period_type)
-    if not insights:
-        st.success("El periodo se observa estable bajo los criterios vigentes.")
-    else:
-        for level, title, text in insights:
-            if level == "error":
-                st.error(f"**{title}**\n\n{text}")
-            elif level == "warning":
-                st.warning(f"**{title}**\n\n{text}")
-            elif level == "success":
-                st.success(f"**{title}**\n\n{text}")
-            else:
-                st.info(f"**{title}**\n\n{text}")
-
-# =========================================================
-# SPECIALTIES + DOCTORS
-# =========================================================
-left_spec, right_spec = st.columns([2, 1], gap="large")
-
-with left_spec:
-    fig_spec = build_specialty_chart(metrics, prev_metrics)
-    st.plotly_chart(fig_spec, use_container_width=True)
-
-with right_spec:
-    st.markdown('<div class="panel-title">Podio de facturación</div>', unsafe_allow_html=True)
-    top_specialties = sorted(metrics["specialty_ventas"].items(), key=lambda x: x[1], reverse=True)[:3]
-    if not top_specialties:
-        st.info("Sin datos para el filtro actual.")
-    else:
-        medals = ["🥇", "🥈", "🥉"]
-        for i, (name, value) in enumerate(top_specialties):
-            prev_value = prev_metrics["specialty_ventas"].get(name, 0) if prev_metrics else None
-            delta = safe_percent_delta(value, prev_value) if prev_metrics else None
-            delta_txt = "Sin base" if delta is None else f"{'▲' if delta >= 0 else '▼'} {abs(delta):.1f}%"
+    with left:
+        st.markdown('<div class="panel-title">Lectura board-ready</div>', unsafe_allow_html=True)
+        for title, text in board_bullets:
             st.markdown(
                 f"""
                 <div class="summary-item">
-                    <div class="summary-item-title">{medals[i]} {html.escape(name)}</div>
-                    <div class="summary-item-text">{format_currency(value)} · {delta_txt}</div>
+                    <div class="summary-item-title">{html.escape(title)}</div>
+                    <div class="summary-item-text">{html.escape(text)}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-st.markdown("### Detalle por especialidad y médico")
-specialty_options = sorted(filtered_df["specialty"].dropna().unique().tolist())
-selected_specialty = st.selectbox("Especialidad", specialty_options) if specialty_options else None
-
-if selected_specialty:
-    doctor_df = (
-        filtered_df[filtered_df["specialty"] == selected_specialty]
-        .groupby("doctor", dropna=False)
-        .agg(
-            pacientes_unicos=("account", "nunique"),
-            cuenta_full=("account_full", "sum"),
-            cuenta_ventas=("account_ventas", "sum"),
+    with right:
+        st.markdown('<div class="panel-title">Contexto del filtro</div>', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="metric-mini">
+                <div class="kpi-label">Periodo</div>
+                <div class="kpi-value" style="font-size:1.2rem;">{html.escape(period_label)}</div>
+                <div class="kpi-sub">Segmento: {html.escape(segment)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-        .reset_index()
-        .sort_values("cuenta_ventas", ascending=False)
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="metric-mini">
+                <div class="kpi-label">Hojas activas</div>
+                <div class="kpi-value" style="font-size:1.2rem;">{format_num(len(effective_active_sheets))}</div>
+                <div class="kpi-sub">{html.escape(', '.join(effective_active_sheets[:3]))}{'...' if len(effective_active_sheets) > 3 else ''}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    revenue_target = period_target(period_type, targets["annual_revenue"], targets["annual_revenue"] / 12)
+    patients_target = period_target(period_type, 0, targets["monthly_patients"])
+
+    revenue_delta = safe_percent_delta(metrics["account_ventas"], prev_metrics["account_ventas"]) if prev_metrics else None
+    mix_delta = safe_point_delta(metrics["key_mix_pct"], prev_metrics["key_mix_pct"]) if prev_metrics else None
+    repeat_delta = safe_point_delta(metrics["repeat_doctors_pct"], prev_metrics["repeat_doctors_pct"]) if prev_metrics else None
+    patients_delta = safe_percent_delta(metrics["patients"], prev_metrics["patients"]) if prev_metrics else None
+
+    c1, c2, c3, c4 = st.columns(4, gap="medium")
+
+    with c1:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Ingresos del periodo</div>
+                <div class="kpi-value">{format_currency_compact(metrics["account_ventas"])}</div>
+                <div class="kpi-sub">Meta: {format_currency_compact(revenue_target)}</div>
+                <div class="kpi-sub">Proyección: {format_currency_compact(metrics["projected_ventas"])}</div>
+                {trend_html(revenue_delta, "%")}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with c2:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Mix esp. clave</div>
+                <div class="kpi-value" style="color:#10b981;">{format_pct(metrics["key_mix_pct"])}</div>
+                <div class="kpi-sub">Meta: {format_pct(targets["mix_pct"])}</div>
+                {trend_html(mix_delta, "pp")}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with c3:
+        color = "#10b981" if metrics["repeat_doctors_pct"] >= targets["repeat_doctors_pct"] else "#ef4444"
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Médicos &gt; 1 paciente</div>
+                <div class="kpi-value" style="color:{color};">{format_pct(metrics["repeat_doctors_pct"])}</div>
+                <div class="kpi-sub">Meta: {format_pct(targets["repeat_doctors_pct"])}</div>
+                {trend_html(repeat_delta, "pp")}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with c4:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Pacientes únicos</div>
+                <div class="kpi-value">{format_num(metrics["patients"])}</div>
+                <div class="kpi-sub">Meta: {format_num(patients_target)} pacientes</div>
+                <div class="kpi-sub">Ticket: {format_currency_compact(metrics["avg_ticket_ventas"])}</div>
+                {trend_html(patients_delta, "%")}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    l1, l2 = st.columns([2, 1], gap="large")
+    with l1:
+        st.plotly_chart(build_main_chart(df_active, segment, period_type, year, sub_period), use_container_width=True)
+    with l2:
+        st.markdown('<div class="panel-title">Insights automáticos</div>', unsafe_allow_html=True)
+        insights = build_insights(metrics, prev_metrics, targets, period_type)
+        if not insights:
+            st.success("El periodo se observa estable bajo los criterios vigentes.")
+        else:
+            for level, title, text in insights:
+                if level == "error":
+                    st.error(f"**{title}**\n\n{text}")
+                elif level == "warning":
+                    st.warning(f"**{title}**\n\n{text}")
+                elif level == "success":
+                    st.success(f"**{title}**\n\n{text}")
+                else:
+                    st.info(f"**{title}**\n\n{text}")
+
+    l3, l4 = st.columns([2, 1], gap="large")
+    with l3:
+        st.plotly_chart(build_specialty_chart(metrics, prev_metrics), use_container_width=True)
+    with l4:
+        st.plotly_chart(build_segment_donut(metrics), use_container_width=True)
+
+    st.markdown("### Detalle estratégico del periodo")
+    detail_table = build_detail_table(metrics, targets, period_type)
+    st.dataframe(detail_table, use_container_width=True, hide_index=True)
+
+with tab_med:
+    st.markdown("### Especialidades, médicos y productividad")
+    left_spec, right_spec = st.columns([1, 1], gap="large")
+
+    with left_spec:
+        top_specialties = sorted(metrics["specialty_ventas"].items(), key=lambda x: x[1], reverse=True)[:10]
+        if top_specialties:
+            specialty_df = pd.DataFrame(top_specialties, columns=["Especialidad", "Cuenta Ventas"])
+            specialty_df["Cuenta Ventas"] = specialty_df["Cuenta Ventas"].map(format_currency)
+            st.dataframe(specialty_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Sin especialidades para el filtro actual.")
+
+    with right_spec:
+        top_doctors = metrics["doctor_stats"].copy()
+        if not top_doctors.empty:
+            top_doctors["Pacientes"] = top_doctors["patients"].map(format_num)
+            top_doctors["Cuenta Full"] = top_doctors["account_full"].map(format_currency)
+            top_doctors["Cuenta Ventas"] = top_doctors["account_ventas"].map(format_currency)
+            st.dataframe(
+                top_doctors.rename(columns={"doctor": "Médico"})[
+                    ["Médico", "Pacientes", "Cuenta Full", "Cuenta Ventas"]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("Sin médicos para el filtro actual.")
+
+    st.markdown("### Detalle por especialidad")
+    specialty_options = sorted(filtered_df["specialty"].dropna().unique().tolist())
+    selected_specialty = st.selectbox("Especialidad", specialty_options) if specialty_options else None
+
+    if selected_specialty:
+        doctor_df = (
+            filtered_df[filtered_df["specialty"] == selected_specialty]
+            .groupby("doctor", dropna=False)
+            .agg(
+                pacientes_unicos=("account", "nunique"),
+                cuenta_full=("account_full", "sum"),
+                cuenta_ventas=("account_ventas", "sum"),
+            )
+            .reset_index()
+            .sort_values("cuenta_ventas", ascending=False)
+        )
+
+        doctor_df = doctor_df.rename(columns={"doctor": "Médico"})
+        doctor_df["Pacientes Únicos"] = doctor_df["pacientes_unicos"].map(format_num)
+        doctor_df["Cuenta Full"] = doctor_df["cuenta_full"].map(format_currency)
+        doctor_df["Cuenta Ventas"] = doctor_df["cuenta_ventas"].map(format_currency)
+
+        st.dataframe(
+            doctor_df[["Médico", "Pacientes Únicos", "Cuenta Full", "Cuenta Ventas"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+with tab_data:
+    st.markdown("### Calidad de datos")
+    q1, q2, q3, q4 = st.columns(4, gap="medium")
+
+    with q1:
+        st.metric("Registros visibles", format_num(len(filtered_df)))
+    with q2:
+        st.metric("Cuentas únicas visibles", format_num(filtered_df["account"].nunique() if not filtered_df.empty else 0))
+    with q3:
+        st.metric("Médicos visibles", format_num(filtered_df["doctor"].nunique() if not filtered_df.empty else 0))
+    with q4:
+        st.metric("Especialidades visibles", format_num(filtered_df["specialty"].nunique() if not filtered_df.empty else 0))
+
+    st.markdown("### Muestra de datos filtrados")
+    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+
+    st.markdown("### Exportación")
+    detail_table = build_detail_table(metrics, targets, period_type)
+    summary_text = build_summary_text(
+        workbook_name=uploaded_file.name,
+        period_label=period_label,
+        segment=segment,
+        metrics=metrics,
+        detail_df=detail_table,
     )
+    export_excel_bytes = export_filtered_excel(filtered_df, detail_table)
 
-    doctor_df = doctor_df.rename(columns={"doctor": "Médico"})
-    doctor_df["Cuenta Full"] = doctor_df["cuenta_full"].map(format_currency)
-    doctor_df["Cuenta Ventas"] = doctor_df["cuenta_ventas"].map(format_currency)
-    doctor_df["Pacientes Únicos"] = doctor_df["pacientes_unicos"].map(format_num)
+    e1, e2 = st.columns(2, gap="large")
+    with e1:
+        st.download_button(
+            label="Descargar resumen ejecutivo (.txt)",
+            data=summary_text.encode("utf-8"),
+            file_name=f"resumen_ejecutivo_{period_type}_{year}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
 
-    st.dataframe(
-        doctor_df[["Médico", "Pacientes Únicos", "Cuenta Full", "Cuenta Ventas"]],
-        use_container_width=True,
-        hide_index=True,
-    )
+    with e2:
+        st.download_button(
+            label="Descargar Excel filtrado (.xlsx)",
+            data=export_excel_bytes,
+            file_name=f"dashboard_filtrado_{period_type}_{year}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
 
-# =========================================================
-# DETAIL TABLE
-# =========================================================
-st.markdown("### Detalle estratégico del periodo")
-detail_table = build_detail_table(metrics, targets, period_type)
-st.dataframe(detail_table, use_container_width=True, hide_index=True)
-
-# =========================================================
-# EXPORTS
-# =========================================================
-st.markdown("### Exportación")
-export_col1, export_col2 = st.columns(2, gap="large")
-
-summary_text = build_summary_text(
-    workbook_name=uploaded_file.name,
-    period_label=period_label,
-    segment=segment,
-    metrics=metrics,
-    detail_df=detail_table,
-)
-
-export_excel_bytes = export_filtered_excel(filtered_df, detail_table)
-
-with export_col1:
-    st.download_button(
-        label="Descargar resumen ejecutivo (.txt)",
-        data=summary_text.encode("utf-8"),
-        file_name=f"resumen_ejecutivo_{period_type}_{year}.txt",
-        mime="text/plain",
-        use_container_width=True,
-    )
-
-with export_col2:
-    st.download_button(
-        label="Descargar Excel filtrado (.xlsx)",
-        data=export_excel_bytes,
-        file_name=f"dashboard_filtrado_{period_type}_{year}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-
-# =========================================================
-# KPI GLOSSARY
-# =========================================================
-with st.expander("Glosario de KPIs"):
-    for _, item in KPI_DEFINITIONS.items():
-        st.markdown(f"**{item['title']}**")
-        st.markdown(f"- Objetivo: {item['goal']}")
-        st.markdown(f"- Fórmula: `{item['formula']}`")
-        st.markdown(f"- Interpretación: {item['meaning']}")
+    with st.expander("Glosario de KPIs"):
+        for _, item in KPI_DEFINITIONS.items():
+            st.markdown(f"**{item['title']}**")
+            st.markdown(f"- Objetivo: {item['goal']}")
+            st.markdown(f"- Fórmula: `{item['formula']}`")
+            st.markdown(f"- Interpretación: {item['meaning']}")
