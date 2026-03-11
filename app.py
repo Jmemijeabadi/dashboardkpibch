@@ -1,7 +1,7 @@
 import io
 import html
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -587,10 +587,15 @@ def parse_workbook(file_bytes: bytes) -> dict:
 # =========================================================
 # FILTROS / MÉTRICAS
 # =========================================================
-def get_active_rows(df: pd.DataFrame, active_sheets: List[str]) -> pd.DataFrame:
-    if not active_sheets:
+def get_active_rows(df: pd.DataFrame, active_sheets: List[str], detail_sheets: List[str]) -> pd.DataFrame:
+    """
+    Si active_sheets viene vacío por estado persistido del multiselect,
+    usamos todas las hojas operativas detectadas como fallback.
+    """
+    effective_sheets = active_sheets if active_sheets else detail_sheets
+    if not effective_sheets:
         return df.iloc[0:0].copy()
-    return df[df["source_sheet"].isin(active_sheets)].copy()
+    return df[df["source_sheet"].isin(effective_sheets)].copy()
 
 
 def get_available_years(df: pd.DataFrame) -> List[int]:
@@ -996,7 +1001,6 @@ def build_summary_text(
     period_label: str,
     segment: str,
     metrics: dict,
-    targets: dict,
     detail_df: pd.DataFrame,
 ) -> str:
     lines = [
@@ -1076,16 +1080,45 @@ insurance_summary = parsed["insurance_summary"]
 coverage_min = parsed["coverage_min"]
 coverage_max = parsed["coverage_max"]
 
+st.sidebar.markdown("### Hojas detectadas")
+if detail_sheets:
+    st.sidebar.success(f"{len(detail_sheets)} hoja(s) operativa(s) detectada(s)")
+    for s in detail_sheets:
+        st.sidebar.caption(f"• {s}")
+else:
+    st.sidebar.error("No se detectaron hojas operativas")
+
+# FIX: sanea el estado persistido del multiselect entre archivos
+if "active_sheets" not in st.session_state:
+    st.session_state.active_sheets = detail_sheets.copy()
+else:
+    st.session_state.active_sheets = [
+        s for s in st.session_state.active_sheets if s in detail_sheets
+    ]
+    if not st.session_state.active_sheets:
+        st.session_state.active_sheets = detail_sheets.copy()
+
 active_sheets = st.sidebar.multiselect(
     "Hojas operativas activas",
     options=detail_sheets,
-    default=detail_sheets,
+    default=st.session_state.active_sheets,
+    key="active_sheets",
 )
 
-df_active = get_active_rows(df_all, active_sheets)
+# fallback defensivo
+if not active_sheets and detail_sheets:
+    active_sheets = detail_sheets.copy()
+    st.session_state.active_sheets = active_sheets
+
+df_active = get_active_rows(df_all, active_sheets, detail_sheets)
+
+if df_active.empty and detail_sheets:
+    active_sheets = detail_sheets.copy()
+    st.session_state.active_sheets = active_sheets
+    df_active = get_active_rows(df_all, active_sheets, detail_sheets)
 
 if df_active.empty:
-    st.warning("No hay hojas activas seleccionadas.")
+    st.error("Se detectaron hojas operativas, pero no se pudo construir un dataset activo. Revisa el parser o la estructura del archivo.")
     st.stop()
 
 segment = st.sidebar.selectbox("Segmento", SEGMENT_OPTIONS, index=0)
@@ -1347,7 +1380,6 @@ summary_text = build_summary_text(
     period_label=period_label,
     segment=segment,
     metrics=metrics,
-    targets=targets,
     detail_df=detail_table,
 )
 
@@ -1375,7 +1407,7 @@ with export_col2:
 # KPI GLOSSARY
 # =========================================================
 with st.expander("Glosario de KPIs"):
-    for key, item in KPI_DEFINITIONS.items():
+    for _, item in KPI_DEFINITIONS.items():
         st.markdown(f"**{item['title']}**")
         st.markdown(f"- Objetivo: {item['goal']}")
         st.markdown(f"- Fórmula: `{item['formula']}`")
