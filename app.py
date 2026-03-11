@@ -67,75 +67,111 @@ st.markdown(
     """
     <style>
         .main {
-            background: #f8fafc;
+            background:
+                radial-gradient(circle at top right, rgba(59,130,246,0.10), transparent 22%),
+                radial-gradient(circle at top left, rgba(15,23,42,0.06), transparent 20%),
+                #f6f9fc;
         }
+
         .block-container {
-            padding-top: 1.1rem;
-            padding-bottom: 2rem;
+            padding-top: 1rem;
+            padding-bottom: 2.5rem;
+            max-width: 1680px;
         }
-        .ga-title {
-            font-size: 1.7rem;
+
+        section[data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+            border-right: 1px solid rgba(255,255,255,0.06);
+        }
+
+        section[data-testid="stSidebar"] * {
+            color: #e5e7eb !important;
+        }
+
+        section[data-testid="stSidebar"] .stNumberInput input,
+        section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div,
+        section[data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
+        section[data-testid="stSidebar"] .stTextInput input {
+            background: rgba(255,255,255,0.06) !important;
+            border: 1px solid rgba(255,255,255,0.08) !important;
+            border-radius: 12px !important;
+        }
+
+        .hero-card {
+            background:
+                linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(30,41,59,0.98) 55%, rgba(37,99,235,0.95) 100%);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 24px;
+            padding: 1.35rem 1.4rem;
+            color: #fff;
+            box-shadow: 0 24px 44px -28px rgba(15,23,42,0.55);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .hero-card:before {
+            content: "";
+            position: absolute;
+            width: 320px;
+            height: 320px;
+            right: -90px;
+            top: -120px;
+            background: radial-gradient(circle, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.00) 70%);
+            pointer-events: none;
+        }
+
+        .hero-title {
+            font-size: 1.85rem;
             font-weight: 800;
-            letter-spacing: -0.03em;
-            color: #0f172a;
-            margin-bottom: 0.1rem;
+            letter-spacing: -0.04em;
+            margin-bottom: 0.15rem;
         }
-        .ga-subtitle {
-            color: #64748b;
+
+        .hero-subtitle {
+            color: rgba(255,255,255,0.82);
             font-size: 0.95rem;
             margin-bottom: 1rem;
         }
-        .kpi-card {
-            background: linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
-            border: 1px solid #e2e8f0;
-            border-radius: 18px;
-            padding: 1rem 1.1rem;
-            box-shadow: 0 14px 28px -24px rgba(15,23,42,0.18);
-            min-height: 146px;
-        }
-        .kpi-label {
+
+        .hero-chip {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.10);
+            border: 1px solid rgba(255,255,255,0.12);
+            color: #fff;
             font-size: 0.72rem;
-            text-transform: uppercase;
-            letter-spacing: .06em;
-            color: #64748b;
             font-weight: 700;
-            margin-bottom: 0.35rem;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            backdrop-filter: blur(4px);
         }
-        .kpi-value {
-            font-size: 2rem;
+
+        .summary-box {
+            background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 22px;
+            padding: 1rem 1.1rem;
+            box-shadow: 0 18px 36px -28px rgba(15,23,42,0.18);
+        }
+
+        .panel-title {
+            font-size: 1rem;
             font-weight: 800;
             color: #0f172a;
-            letter-spacing: -0.03em;
-            line-height: 1.02;
+            margin-bottom: 0.15rem;
+            letter-spacing: -0.01em;
         }
-        .kpi-sub {
+
+        .panel-subtitle {
             color: #64748b;
-            font-size: 0.8rem;
-            margin-top: 0.28rem;
+            font-size: 0.82rem;
+            margin-bottom: 0.8rem;
         }
-        .trend {
-            display: inline-block;
-            margin-top: 0.5rem;
-            padding: 3px 8px;
-            border-radius: 999px;
-            font-size: 0.73rem;
-            font-weight: 700;
-        }
-        .trend-up {
-            background: #dcfce7;
-            color: #15803d;
-        }
-        .trend-down {
-            background: #fee2e2;
-            color: #b91c1c;
-        }
-        .trend-neutral {
-            background: #f1f5f9;
-            color: #64748b;
-        }
+
         .badge-pill {
             display: inline-block;
-            padding: 4px 10px;
+            padding: 5px 10px;
             border-radius: 999px;
             font-size: 0.72rem;
             font-weight: 700;
@@ -145,63 +181,251 @@ st.markdown(
             background: #f8fafc;
             color: #334155;
         }
+
         .badge-ok {
             background: #ecfdf5;
             color: #047857;
             border-color: #bbf7d0;
         }
+
         .badge-info {
             background: #eff6ff;
             color: #1d4ed8;
             border-color: #bfdbfe;
         }
+
         .badge-warn {
             background: #fffbeb;
             color: #b45309;
             border-color: #fde68a;
         }
-        .summary-box {
-            background: linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
+
+        .kpi-card {
+            background:
+                linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 22px;
+            padding: 1rem 1.05rem;
+            box-shadow: 0 18px 36px -28px rgba(15,23,42,0.18);
+            min-height: 170px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .kpi-card:after {
+            content: "";
+            position: absolute;
+            width: 160px;
+            height: 160px;
+            right: -50px;
+            top: -55px;
+            background: radial-gradient(circle, rgba(59,130,246,0.08) 0%, rgba(59,130,246,0) 70%);
+            pointer-events: none;
+        }
+
+        .kpi-label {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: .07em;
+            color: #64748b;
+            font-weight: 800;
+            margin-bottom: 0.35rem;
+        }
+
+        .kpi-value {
+            font-size: 2.05rem;
+            font-weight: 800;
+            color: #0f172a;
+            letter-spacing: -0.045em;
+            line-height: 1.02;
+        }
+
+        .kpi-sub {
+            color: #64748b;
+            font-size: 0.8rem;
+            margin-top: 0.3rem;
+        }
+
+        .kpi-progress-wrap {
+            margin-top: 0.75rem;
+        }
+
+        .kpi-progress-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.72rem;
+            color: #64748b;
+            margin-bottom: 0.22rem;
+        }
+
+        .kpi-progress-bar {
+            width: 100%;
+            height: 7px;
+            background: #eef2f7;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .kpi-progress-bar > span {
+            display: block;
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #2563eb 0%, #3b82f6 100%);
+        }
+
+        .trend {
+            display: inline-block;
+            margin-top: 0.55rem;
+            padding: 4px 9px;
+            border-radius: 999px;
+            font-size: 0.73rem;
+            font-weight: 700;
+        }
+
+        .trend-up {
+            background: #dcfce7;
+            color: #15803d;
+        }
+
+        .trend-down {
+            background: #fee2e2;
+            color: #b91c1c;
+        }
+
+        .trend-neutral {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+
+        .insight-box {
+            background: #ffffff;
             border: 1px solid #e2e8f0;
             border-radius: 18px;
-            padding: 1rem 1.1rem;
-            box-shadow: 0 14px 28px -24px rgba(15,23,42,0.18);
+            padding: 0.95rem 1rem;
+            box-shadow: 0 12px 28px -24px rgba(15,23,42,0.12);
         }
+
         .summary-item {
             background: #f8fafc;
             border: 1px solid #eef2f7;
-            border-radius: 12px;
-            padding: 0.85rem 0.95rem;
-            margin-bottom: 0.65rem;
+            border-radius: 14px;
+            padding: 0.9rem 1rem;
+            margin-bottom: 0.7rem;
         }
+
         .summary-item-title {
             font-weight: 800;
             color: #0f172a;
             font-size: 0.9rem;
             margin-bottom: 0.12rem;
+            letter-spacing: -0.01em;
         }
+
         .summary-item-text {
             color: #475569;
             font-size: 0.83rem;
-            line-height: 1.4;
+            line-height: 1.42;
         }
-        .panel-title {
-            font-size: 1rem;
+
+        .metric-mini {
+            background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 0.85rem 0.95rem;
+            min-height: 98px;
+            box-shadow: 0 10px 24px -24px rgba(15,23,42,0.16);
+        }
+
+        .metric-mini .mini-label {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: 800;
+            letter-spacing: .06em;
+        }
+
+        .metric-mini .mini-value {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-top: 0.25rem;
+            letter-spacing: -0.03em;
+        }
+
+        .metric-mini .mini-sub {
+            color: #64748b;
+            font-size: 0.78rem;
+            margin-top: 0.2rem;
+        }
+
+        .section-divider {
+            height: 1px;
+            background: linear-gradient(90deg, rgba(148,163,184,0.0), rgba(148,163,184,0.35), rgba(148,163,184,0.0));
+            margin: 1rem 0 1.1rem 0;
+        }
+
+        .info-pill-dark {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            margin-right: 6px;
+            margin-bottom: 6px;
+            background: rgba(255,255,255,0.10);
+            border: 1px solid rgba(255,255,255,0.12);
+        }
+
+        .top-card {
+            background: linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 18px;
+            padding: 0.95rem 1rem;
+            box-shadow: 0 12px 28px -26px rgba(15,23,42,0.15);
+            margin-bottom: 0.65rem;
+        }
+
+        .top-card-title {
+            font-size: 0.88rem;
             font-weight: 800;
             color: #0f172a;
             margin-bottom: 0.15rem;
         }
-        .panel-subtitle {
+
+        .top-card-sub {
+            font-size: 0.79rem;
             color: #64748b;
-            font-size: 0.82rem;
-            margin-bottom: 0.8rem;
         }
-        .metric-mini {
-            background: #ffffff;
+
+        div[data-testid="stMetric"] {
+            background: linear-gradient(180deg,#ffffff 0%,#fcfdff 100%);
             border: 1px solid #e2e8f0;
-            border-radius: 14px;
-            padding: 0.85rem 0.95rem;
-            min-height: 90px;
+            border-radius: 16px;
+            padding: 0.6rem 0.8rem;
+            box-shadow: 0 10px 24px -24px rgba(15,23,42,0.15);
+        }
+
+        div[data-testid="stDataFrame"] {
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 10px;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 999px;
+            padding: 10px 16px;
+            font-weight: 700;
+            background: #eef2f7;
+            color: #334155;
+        }
+
+        .stTabs [aria-selected="true"] {
+            background: #0f172a !important;
+            color: #ffffff !important;
         }
     </style>
     """,
@@ -397,6 +621,12 @@ def trend_html(delta: Optional[float], unit: str = "%") -> str:
     if delta < -0.1:
         return f'<span class="trend trend-down">▼ {abs(delta):.1f}{unit} vs prev.</span>'
     return f'<span class="trend trend-neutral">• {abs(delta):.1f}{unit} vs prev.</span>'
+
+
+def progress_pct(value: float, target: float) -> float:
+    if target <= 0:
+        return 0
+    return max(0, min((value / target) * 100, 100))
 
 
 # =========================================================
@@ -788,7 +1018,7 @@ def build_main_chart(df_active: pd.DataFrame, segment: str, period_type: str, ye
             x=labels,
             y=mixes,
             mode="lines+markers",
-            line=dict(color="#10b981", width=2),
+            line=dict(color="#10b981", width=2.5),
             marker=dict(size=6),
         ),
         secondary_y=True,
@@ -797,12 +1027,12 @@ def build_main_chart(df_active: pd.DataFrame, segment: str, period_type: str, ye
     fig.update_layout(
         title=f"{title}<br><sup>{subtitle}</sup>",
         template="plotly_white",
-        height=390,
-        margin=dict(l=10, r=10, t=72, b=20),
+        height=400,
+        margin=dict(l=10, r=10, t=74, b=20),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
-    fig.update_yaxes(title_text="Cuenta Ventas", secondary_y=False)
-    fig.update_yaxes(title_text="Mix %", secondary_y=True)
+    fig.update_yaxes(title_text="Cuenta Ventas", secondary_y=False, gridcolor="#edf2f7")
+    fig.update_yaxes(title_text="Mix %", secondary_y=True, gridcolor="rgba(0,0,0,0)")
     return fig
 
 
@@ -833,8 +1063,8 @@ def build_specialty_chart(curr_metrics: Dict[str, Any], prev_metrics: Optional[D
     fig.update_layout(
         title="Top 5 especialidades · Cuenta Ventas",
         template="plotly_white",
-        height=340,
-        margin=dict(l=10, r=40, t=55, b=20),
+        height=360,
+        margin=dict(l=10, r=40, t=58, b=20),
         yaxis=dict(categoryorder="total ascending"),
     )
     return fig
@@ -851,9 +1081,9 @@ def build_segment_donut(metrics: Dict[str, Any]) -> go.Figure:
             go.Pie(
                 labels=labels,
                 values=values,
-                hole=0.58,
+                hole=0.62,
                 sort=False,
-                marker=dict(colors=["#0f172a", "#3b82f6", "#10b981", "#f59e0b"]),
+                marker=dict(colors=["#0f172a", "#2563eb", "#10b981", "#f59e0b"]),
                 textinfo="label+percent",
             )
         ]
@@ -861,8 +1091,8 @@ def build_segment_donut(metrics: Dict[str, Any]) -> go.Figure:
     fig.update_layout(
         title="Composición por segmento",
         template="plotly_white",
-        height=340,
-        margin=dict(l=10, r=10, t=55, b=10),
+        height=360,
+        margin=dict(l=10, r=10, t=58, b=10),
         showlegend=False,
     )
     return fig
@@ -1064,13 +1294,22 @@ targets = {
 # =========================================================
 # EMPTY STATE
 # =========================================================
-st.markdown('<div class="ga-title">NewCity Hospital BI 2026</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="ga-subtitle">Dashboard ejecutivo KO26 · Business Intelligence para ingresos, mezcla, recurrencia médica y volumen hospitalario</div>',
-    unsafe_allow_html=True,
-)
-
 if not uploaded_file:
+    st.markdown(
+        """
+        <div class="hero-card">
+            <div class="hero-title">NewCity Hospital BI 2026</div>
+            <div class="hero-subtitle">
+                Dashboard ejecutivo KO26 para monitorear ingresos, mezcla estratégica, recurrencia médica, volumen hospitalario y composición comercial.
+            </div>
+            <span class="hero-chip">Business Intelligence</span>
+            <span class="hero-chip">Board-Ready</span>
+            <span class="hero-chip">KPIs estratégicos</span>
+            <span class="hero-chip">Excel multi-hoja</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.info("Carga un workbook para activar el dashboard.")
     st.stop()
 
@@ -1089,14 +1328,6 @@ detail_sheets = parsed["detail_sheets"]
 insurance_summary = parsed["insurance_summary"]
 coverage_min = parsed["coverage_min"]
 coverage_max = parsed["coverage_max"]
-
-st.sidebar.markdown("### Hojas detectadas")
-if detail_sheets:
-    st.sidebar.success(f"{len(detail_sheets)} hoja(s) operativa(s) detectada(s)")
-    for s in detail_sheets:
-        st.sidebar.caption(f"• {s}")
-else:
-    st.sidebar.error("No se detectaron hojas operativas")
 
 
 # =========================================================
@@ -1169,6 +1400,32 @@ period_label = describe_period(period_type, year, sub_period)
 
 
 # =========================================================
+# HERO
+# =========================================================
+st.markdown(
+    f"""
+    <div class="hero-card">
+        <div class="hero-title">NewCity Hospital BI 2026</div>
+        <div class="hero-subtitle">
+            Vista ejecutiva de desempeño hospitalario y comercial para lectura de dirección, comité y board.
+        </div>
+        <span class="hero-chip">Workbook: {html.escape(uploaded_file.name)}</span>
+        <span class="hero-chip">Periodo: {html.escape(period_label)}</span>
+        <span class="hero-chip">Segmento: {html.escape(segment)}</span>
+        <span class="hero-chip">{len(effective_active_sheets)} hoja(s) activa(s)</span>
+        <div style="margin-top:10px;">
+            <span class="info-pill-dark">Cobertura {coverage_min.strftime('%d-%b-%Y')} a {coverage_max.strftime('%d-%b-%Y')}</span>
+            <span class="info-pill-dark">{format_num(len(df_all))} registros consolidados</span>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+
+# =========================================================
 # HEADER SUMMARY
 # =========================================================
 badges = [
@@ -1180,10 +1437,10 @@ badges.extend(build_validation_badges(metrics, insurance_summary))
 
 st.markdown(
     f"""
-    <div class="summary-box" style="margin-bottom: 1rem;">
+    <div class="summary-box">
         <div class="panel-title">Resumen ejecutivo del workbook</div>
         <div class="panel-subtitle">
-            {html.escape(uploaded_file.name)} · cobertura {coverage_min.strftime('%d-%b-%Y')} a {coverage_max.strftime('%d-%b-%Y')} · {format_num(len(df_all))} registros consolidados
+            Consolidación automática de hojas operativas con lectura orientada a KPIs y validaciones de negocio.
         </div>
         <div>{"".join(badges)}</div>
     </div>
@@ -1221,9 +1478,9 @@ with tab_exec:
         st.markdown(
             f"""
             <div class="metric-mini">
-                <div class="kpi-label">Periodo</div>
-                <div class="kpi-value" style="font-size:1.2rem;">{html.escape(period_label)}</div>
-                <div class="kpi-sub">Segmento: {html.escape(segment)}</div>
+                <div class="mini-label">Periodo</div>
+                <div class="mini-value">{html.escape(period_label)}</div>
+                <div class="mini-sub">Segmento: {html.escape(segment)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1232,9 +1489,9 @@ with tab_exec:
         st.markdown(
             f"""
             <div class="metric-mini">
-                <div class="kpi-label">Hojas activas</div>
-                <div class="kpi-value" style="font-size:1.2rem;">{format_num(len(effective_active_sheets))}</div>
-                <div class="kpi-sub">{html.escape(', '.join(effective_active_sheets[:3]))}{'...' if len(effective_active_sheets) > 3 else ''}</div>
+                <div class="mini-label">Hojas activas</div>
+                <div class="mini-value">{format_num(len(effective_active_sheets))}</div>
+                <div class="mini-sub">{html.escape(', '.join(effective_active_sheets[:3]))}{'...' if len(effective_active_sheets) > 3 else ''}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1251,6 +1508,7 @@ with tab_exec:
     c1, c2, c3, c4 = st.columns(4, gap="medium")
 
     with c1:
+        prog = progress_pct(metrics["account_ventas"], revenue_target)
         st.markdown(
             f"""
             <div class="kpi-card">
@@ -1258,6 +1516,10 @@ with tab_exec:
                 <div class="kpi-value">{format_currency_compact(metrics["account_ventas"])}</div>
                 <div class="kpi-sub">Meta: {format_currency_compact(revenue_target)}</div>
                 <div class="kpi-sub">Proyección: {format_currency_compact(metrics["projected_ventas"])}</div>
+                <div class="kpi-progress-wrap">
+                    <div class="kpi-progress-label"><span>Cumplimiento</span><span>{prog:.0f}%</span></div>
+                    <div class="kpi-progress-bar"><span style="width:{prog:.0f}%"></span></div>
+                </div>
                 {trend_html(revenue_delta, "%")}
             </div>
             """,
@@ -1265,12 +1527,17 @@ with tab_exec:
         )
 
     with c2:
+        prog = progress_pct(metrics["key_mix_pct"], targets["mix_pct"])
         st.markdown(
             f"""
             <div class="kpi-card">
                 <div class="kpi-label">Mix esp. clave</div>
                 <div class="kpi-value" style="color:#10b981;">{format_pct(metrics["key_mix_pct"])}</div>
                 <div class="kpi-sub">Meta: {format_pct(targets["mix_pct"])}</div>
+                <div class="kpi-progress-wrap">
+                    <div class="kpi-progress-label"><span>Alineación</span><span>{prog:.0f}%</span></div>
+                    <div class="kpi-progress-bar"><span style="width:{prog:.0f}%"></span></div>
+                </div>
                 {trend_html(mix_delta, "pp")}
             </div>
             """,
@@ -1278,6 +1545,7 @@ with tab_exec:
         )
 
     with c3:
+        prog = progress_pct(metrics["repeat_doctors_pct"], targets["repeat_doctors_pct"])
         color = "#10b981" if metrics["repeat_doctors_pct"] >= targets["repeat_doctors_pct"] else "#ef4444"
         st.markdown(
             f"""
@@ -1285,6 +1553,10 @@ with tab_exec:
                 <div class="kpi-label">Médicos &gt; 1 paciente</div>
                 <div class="kpi-value" style="color:{color};">{format_pct(metrics["repeat_doctors_pct"])}</div>
                 <div class="kpi-sub">Meta: {format_pct(targets["repeat_doctors_pct"])}</div>
+                <div class="kpi-progress-wrap">
+                    <div class="kpi-progress-label"><span>Retención</span><span>{prog:.0f}%</span></div>
+                    <div class="kpi-progress-bar"><span style="width:{prog:.0f}%"></span></div>
+                </div>
                 {trend_html(repeat_delta, "pp")}
             </div>
             """,
@@ -1292,6 +1564,7 @@ with tab_exec:
         )
 
     with c4:
+        prog = progress_pct(metrics["patients"], patients_target)
         st.markdown(
             f"""
             <div class="kpi-card">
@@ -1299,11 +1572,17 @@ with tab_exec:
                 <div class="kpi-value">{format_num(metrics["patients"])}</div>
                 <div class="kpi-sub">Meta: {format_num(patients_target)} pacientes</div>
                 <div class="kpi-sub">Ticket: {format_currency_compact(metrics["avg_ticket_ventas"])}</div>
+                <div class="kpi-progress-wrap">
+                    <div class="kpi-progress-label"><span>Volumen</span><span>{prog:.0f}%</span></div>
+                    <div class="kpi-progress-bar"><span style="width:{prog:.0f}%"></span></div>
+                </div>
                 {trend_html(patients_delta, "%")}
             </div>
             """,
             unsafe_allow_html=True,
         )
+
+    st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
 
     l1, l2 = st.columns([2, 1], gap="large")
     with l1:
@@ -1339,8 +1618,20 @@ with tab_med:
     left_spec, right_spec = st.columns([1, 1], gap="large")
 
     with left_spec:
+        st.markdown('<div class="panel-title">Top especialidades</div>', unsafe_allow_html=True)
         top_specialties = sorted(metrics["specialty_ventas"].items(), key=lambda x: x[1], reverse=True)[:10]
         if top_specialties:
+            for idx, (name, value) in enumerate(top_specialties[:3], start=1):
+                st.markdown(
+                    f"""
+                    <div class="top-card">
+                        <div class="top-card-title">{idx}. {html.escape(name)}</div>
+                        <div class="top-card-sub">{format_currency(value)}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
             specialty_df = pd.DataFrame(top_specialties, columns=["Especialidad", "Cuenta Ventas"])
             specialty_df["Cuenta Ventas"] = specialty_df["Cuenta Ventas"].map(format_currency)
             st.dataframe(specialty_df, use_container_width=True, hide_index=True)
@@ -1348,8 +1639,21 @@ with tab_med:
             st.info("Sin especialidades para el filtro actual.")
 
     with right_spec:
+        st.markdown('<div class="panel-title">Top médicos</div>', unsafe_allow_html=True)
         top_doctors = metrics["doctor_stats"].copy()
         if not top_doctors.empty:
+            top_preview = top_doctors.head(3).copy()
+            for idx, row in top_preview.iterrows():
+                st.markdown(
+                    f"""
+                    <div class="top-card">
+                        <div class="top-card-title">{html.escape(str(row['doctor']))}</div>
+                        <div class="top-card-sub">{format_currency(row['account_ventas'])} · {format_num(row['patients'])} pacientes</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
             top_doctors["Pacientes"] = top_doctors["patients"].map(format_num)
             top_doctors["Cuenta Full"] = top_doctors["account_full"].map(format_currency)
             top_doctors["Cuenta Ventas"] = top_doctors["account_ventas"].map(format_currency)
